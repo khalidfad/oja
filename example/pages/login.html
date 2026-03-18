@@ -1,0 +1,50 @@
+<!--
+  pages/login.html
+  Demonstrates: form.on(), form.showError(), auth.session.start(),
+                notify.error(), Responder implicit via router
+-->
+<div class="page-login" data-title="Sign In">
+    <div class="login-card">
+        <div class="login-logo">Oja</div>
+        <p class="login-sub">Example Application</p>
+
+        <form id="loginForm" autocomplete="off">
+            <div class="field">
+                <label>Username</label>
+                <input name="username" type="text" placeholder="admin" required autofocus>
+                <span class="field-error" data-field="username"></span>
+            </div>
+            <div class="field">
+                <label>Password</label>
+                <input name="password" type="password" placeholder="admin" required>
+                <span class="field-error" data-field="password"></span>
+            </div>
+            <button type="submit" class="btn-primary full-width">Sign In</button>
+        </form>
+
+        <p class="login-hint">Hint: <code>admin / admin</code></p>
+    </div>
+</div>
+
+<script type="module">
+    import { form }   from '../../src/js/form.js';
+    import { auth }   from '../../src/js/auth.js';
+    import { notify } from '../../src/js/notify.js';
+    import { api }    from '../app.js';
+
+    form.on('#loginForm', {
+        submit: async (data) => {
+            const res = await api.post('/login', data);
+            if (!res?.token) throw new Error('Invalid username or password');
+            return res;
+        },
+        success: async (res) => {
+            // auth.session.start() fires OnStart hook → sets token, navigates
+            await auth.session.start(res.token);
+        },
+        error: (err) => {
+            form.showError('#loginForm', 'password', err.message);
+            notify.error(err.message);
+        }
+    });
+</script>

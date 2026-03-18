@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oja Example App</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- NAVBAR — always visible, router updates .active on [data-page] links -->
+<nav class="navbar" id="navbar" style="display:none">
+    <div class="brand">
+        <span class="brand-oja">Oja</span>
+        <span class="brand-example">Example</span>
+    </div>
+    <div class="nav-links">
+        <a href="#/dashboard" data-page="/dashboard">Dashboard</a>
+        <a href="#/hosts"     data-page="/hosts">Hosts</a>
+        <a href="#/firewall"  data-page="/firewall">Firewall</a>
+        <a href="#/logs"      data-page="/logs">Logs</a>
+        <a href="#/settings"  data-page="/settings">Settings</a>
+    </div>
+    <div class="nav-right">
+        <span id="nav-user" class="nav-user"></span>
+        <button id="debug-btn" class="btn-sm" title="Dump Oja debug timeline">Debug</button>
+        <button id="logout-btn" class="btn-sm danger">Logout</button>
+    </div>
+</nav>
+
+<!-- OFFLINE BANNER — notify.banner() injects above this -->
+
+<!-- PAGE OUTLET — router renders every page here -->
+<main id="app">
+    <!-- Initial loading state — replaced on first navigation -->
+    <div class="splash">
+        <div class="splash-logo">Oja</div>
+        <div class="splash-sub">Loading...</div>
+    </div>
+</main>
+
+<!-- MODAL OVERLAYS — modal.js manages these -->
+
+<div class="modal-overlay" id="confirmModal">
+    <div class="modal-box">
+        <p id="confirmText" class="modal-msg"></p>
+        <div class="modal-actions">
+            <button data-confirm-ok   class="btn danger">Confirm</button>
+            <button data-confirm-cancel class="btn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="perfModal">
+    <div class="modal-box modal-large">
+        <button data-action="modal-close" class="modal-close">&times;</button>
+        <h3 id="perfModalTitle">Performance</h3>
+        <div data-modal-body id="perfModalBody"></div>
+    </div>
+</div>
+
+<!-- APP BOOTSTRAP -->
+<script type="module" src="app.js"></script>
+
+</body>
+</html>

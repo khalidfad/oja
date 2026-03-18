@@ -1,0 +1,44 @@
+{
+    "name": "oja",
+    "version": "0.1.0",
+    "description": "Minimal zero-build JavaScript framework for multi-app SPAs",
+    "author": "Agbero HQ <https://github.com/agberohq>",
+    "license": "MIT",
+    "homepage": "https://github.com/agberohq/oja",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/agberohq/oja.git"
+    },
+    "keywords": [
+        "spa", "framework", "router", "zero-build",
+        "vanilla-js", "template", "reactive"
+    ],
+    "type": "module",
+    "main":   "build/oja.min.js",
+    "module": "build/oja.esm.js",
+    "exports": {
+        ".": {
+            "import":  "./build/oja.esm.js",
+            "default": "./build/oja.min.js"
+        },
+        "./src/*":            "./src/*",
+        "./src/js/*":         "./src/js/*",
+        "./src/js/codecs/*":  "./src/js/codecs/*"
+    },
+    "files": [
+        "src/",
+        "build/",
+        "README.md",
+        "LICENSE"
+    ],
+    "scripts": {
+        "build": "make all",
+        "watch": "make watch",
+        "check": "make check",
+        "clean": "make clean"
+    },
+    "devDependencies": {
+        "esbuild":       "latest",
+        "clean-css-cli": "latest"
+    }
+}

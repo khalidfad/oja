@@ -1,0 +1,101 @@
+<!--
+  components/perf-modal.html
+  Performance history modal — loaded by modal.push() from host-detail page.
+  Demonstrates: modal stack level 2, adapter.use('chart'), data-if, {{vars}}
+
+  Data variables (passed via modal.push(id, data)):
+    {{hostname}}   — host being inspected
+    {{p99Ms}}      — current p99 latency
+    {{totalReqs}}  — total request count
+    {{errors}}     — total error count
+    {{activeBackends}} — active backend count
+
+  modal.onOpen() in app.js renders the chart after mount.
+-->
+<div class="perf-header">
+    <div>
+        <h3>Performance History</h3>
+        <span class="perf-hostname muted">{{hostname}}</span>
+    </div>
+    <select id="perfRangeSelect" class="select-sm">
+        <option value="30m">Last 30 min</option>
+        <option value="1h" selected>Last 1 hour</option>
+        <option value="6h">Last 6 hours</option>
+        <option value="24h">Last 24 hours</option>
+    </select>
+</div>
+
+<!-- Current snapshot stats -->
+<div class="perf-grid">
+    <div class="perf-item">
+        <div class="perf-label">p99 Latency</div>
+        <div class="perf-value">{{p99Ms}}ms</div>
+    </div>
+    <div class="perf-item">
+        <div class="perf-label">Total Requests</div>
+        <div class="perf-value">{{totalReqs}}</div>
+    </div>
+    <div class="perf-item">
+        <div class="perf-label">Errors</div>
+        <div class="perf-value" data-if-class="errors:perf-danger">{{errors}}</div>
+    </div>
+    <div class="perf-item">
+        <div class="perf-label">Active Backends</div>
+        <div class="perf-value">{{activeBackends}}</div>
+    </div>
+</div>
+
+<!-- Chart area — adapter.use('chart').draw() targets this canvas -->
+<div class="perf-charts">
+    <div class="perf-chart-header">
+        <span class="muted">p99 Latency (ms)</span>
+        <span id="perf-chart-range" class="muted"></span>
+    </div>
+    <canvas id="perfChart" width="580" height="140"></canvas>
+
+    <div class="perf-chart-header" style="margin-top:16px">
+        <span class="muted">Requests / sec</span>
+    </div>
+    <canvas id="perfChartRps" width="580" height="100"></canvas>
+</div>
+
+<div class="perf-footer muted">
+    Sampled every 60s &bull; 24h max retention
+    <span data-if="hostname"> &bull; {{hostname}}</span>
+</div>
+
+<script type="module">
+    import { adapter } from '../../src/js/adapter.js';
+    import { on }      from '../../src/js/events.js';
+
+    // Draw simulated history charts using registered adapter
+    const chart = adapter.use('chart');
+
+    // Generate fake history data — real app would fetch from /api/hosts/:id/metrics
+    function fakeHistory(base, variance, points = 20) {
+        return Array.from({ length: points }, () =>
+            Math.max(0, base + (Math.random() - 0.5) * variance)
+        );
+    }
+
+    const p99Data = fakeHistory(
+        parseInt(document.querySelector('.perf-value')?.textContent) || 80,
+        60, 24
+    );
+    const rpsData = fakeHistory(48, 20, 24);
+
+    chart.draw(document.getElementById('perfChart'),    p99Data, { label: 'p99 ms'  });
+    chart.draw(document.getElementById('perfChartRps'), rpsData, { label: 'req/s'   });
+
+    // Range selector — re-draws with different point counts
+    on('#perfRangeSelect', 'change', (e, el) => {
+        const points = { '30m': 10, '1h': 24, '6h': 48, '24h': 72 }[el.value] || 24;
+        chart.draw(document.getElementById('perfChart'),
+            fakeHistory(80, 60, points), { label: 'p99 ms' });
+        chart.draw(document.getElementById('perfChartRps'),
+            fakeHistory(48, 20, points), { label: 'req/s' });
+
+        const rangeEl = document.getElementById('perf-chart-range');
+        if (rangeEl) rangeEl.textContent = el.options[el.selectedIndex].text;
+    });
+</script>

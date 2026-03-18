@@ -1,0 +1,195 @@
+<!--
+  pages/settings.html
+  Demonstrates: store (sync + async encrypted), form.on(), form.image(),
+                component.update(), notify, auth.hasRole(), adapter
+-->
+<div class="page" data-title="Settings">
+    <div class="page-header">
+        <h1>Settings</h1>
+    </div>
+
+    <!-- Server info — read only, from store -->
+    <div class="settings-section">
+        <h2>Server Identity</h2>
+        <div class="detail-grid" id="serverInfo">
+            <div class="detail-card">
+                <div class="detail-label">Node ID</div>
+                <div class="detail-value" id="cfg-nodeId">—</div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-label">Hostname</div>
+                <div class="detail-value" id="cfg-hostname">—</div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-label">PID</div>
+                <div class="detail-value" id="cfg-pid">—</div>
+            </div>
+            <div class="detail-card">
+                <div class="detail-label">Started</div>
+                <div class="detail-value" id="cfg-startTime">—</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profile — demonstrates form.image() + encrypted store -->
+    <div class="settings-section">
+        <h2>Profile</h2>
+        <form id="profileForm" class="form-card">
+            <div class="avatar-row">
+                <img id="avatarPreview" src="https://via.placeholder.com/80"
+                     alt="Avatar" class="avatar-img">
+                <div>
+                    <label class="btn-sm" for="avatarInput">Change Photo</label>
+                    <input type="file" id="avatarInput" accept="image/*" style="display:none">
+                    <p class="muted hint">Max 2MB · JPEG, PNG, WebP</p>
+                </div>
+            </div>
+            <div class="field">
+                <label>Display Name</label>
+                <input name="displayName" type="text" id="displayName" placeholder="Your name">
+            </div>
+            <div class="field">
+                <label>Theme</label>
+                <select name="theme" id="themeSelect">
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                </select>
+            </div>
+            <button type="submit" class="btn-primary">Save Profile</button>
+        </form>
+    </div>
+
+    <!-- Admin-only section — auth.hasRole() demo -->
+    <div class="settings-section" id="adminSection">
+        <h2>Administration
+            <span class="badge badge-danger">Admin Only</span>
+        </h2>
+        <div class="form-card">
+            <div class="field">
+                <label>Log Level</label>
+                <select id="logLevelSelect">
+                    <option value="debug">debug</option>
+                    <option value="info">info</option>
+                    <option value="warn">warn</option>
+                    <option value="error">error</option>
+                </select>
+            </div>
+            <button id="save-log-level" class="btn-primary">Apply</button>
+        </div>
+    </div>
+
+    <!-- Store demo — shows what's in the store -->
+    <div class="settings-section">
+        <h2>Session Store
+            <span class="badge">store.js demo</span>
+        </h2>
+        <div id="storeContents" class="code-block"></div>
+        <button id="refresh-store" class="btn-sm">Refresh</button>
+        <button id="clear-store"   class="btn-sm danger">Clear Store</button>
+    </div>
+</div>
+
+<script type="module">
+    import { Store }   from '../../src/js/store.js';
+    import { form }    from '../../src/js/form.js';
+    import { notify }  from '../../src/js/notify.js';
+    import { auth }    from '../../src/js/auth.js';
+    import { logger }  from '../../src/js/logger.js';
+    import { on }      from '../../src/js/events.js';
+    import { api }     from '../app.js';
+
+    // Two stores — one plain, one encrypted
+    const appStore  = new Store('oja-example');
+    const secStore  = new Store('oja-example-secure', { encrypt: true });
+
+    // ── Load server settings ──────────────────────────────────────────────────────
+    const settings = await api.get('/api/settings');
+    if (settings) {
+        document.getElementById('cfg-nodeId').textContent    = settings.nodeId;
+        document.getElementById('cfg-hostname').textContent  = settings.hostname;
+        document.getElementById('cfg-pid').textContent       = settings.pid;
+        document.getElementById('cfg-startTime').textContent =
+            new Date(settings.startTime).toLocaleString();
+    }
+
+    // ── Load saved profile from encrypted store ───────────────────────────────────
+    const savedProfile = await secStore.getAsync('profile');
+    if (savedProfile) {
+        const nameEl = document.getElementById('displayName');
+        if (nameEl) nameEl.value = savedProfile.displayName || '';
+
+        const themeEl = document.getElementById('themeSelect');
+        if (themeEl) themeEl.value = savedProfile.theme || 'dark';
+    }
+
+    // ── Apply saved theme ─────────────────────────────────────────────────────────
+    const savedTheme = appStore.get('theme', 'dark');
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    const themeEl = document.getElementById('themeSelect');
+    if (themeEl) themeEl.value = savedTheme;
+
+    // Theme change — reactive via store.onChange
+    appStore.onChange('theme', (newTheme) => {
+        document.documentElement.setAttribute('data-theme', newTheme);
+        notify.info(`Theme: ${newTheme}`);
+    });
+
+    // ── Image upload + preview (form.image) ───────────────────────────────────────
+    form.image('#avatarInput', '#avatarPreview', {
+        maxSizeMb : 2,
+        accept    : ['image/jpeg', 'image/png', 'image/webp'],
+        onError   : (msg) => notify.error(msg),
+        onSelect  : (file) => notify.info(`Photo selected: ${file.name}`),
+    });
+
+    // ── Profile form ──────────────────────────────────────────────────────────────
+    form.on('#profileForm', {
+        submit: async (data) => {
+            // Store encrypted — demonstrates setAsync
+            await secStore.setAsync('profile', data);
+            appStore.set('theme', data.theme);
+            return data;
+        },
+        success: (data) => {
+            notify.success('Profile saved');
+            logger.info('settings', 'Profile saved', { theme: data.theme });
+        },
+        error: (err) => notify.error(err.message),
+    });
+
+    // ── Admin-only section ────────────────────────────────────────────────────────
+    const adminSection = document.getElementById('adminSection');
+    if (!auth.hasRole('admin')) {
+        adminSection.innerHTML = `
+        <h2>Administration</h2>
+        <p class="muted">You need the <strong>admin</strong> role to access this section.</p>
+    `;
+    } else {
+        const saved = appStore.get('logLevel', 'info');
+        const sel   = document.getElementById('logLevelSelect');
+        if (sel) sel.value = saved;
+
+        on('#save-log-level', 'click', () => {
+            const level = document.getElementById('logLevelSelect')?.value;
+            appStore.set('logLevel', level);
+            logger.setLevel(level.toUpperCase());
+            notify.success(`Log level set to: ${level}`);
+        });
+    }
+
+    // ── Store inspector ───────────────────────────────────────────────────────────
+    function showStore() {
+        const contents = appStore.all();
+        const el = document.getElementById('storeContents');
+        if (el) el.textContent = JSON.stringify(contents, null, 2);
+    }
+    showStore();
+
+    on('#refresh-store', 'click', showStore);
+    on('#clear-store',   'click', async () => {
+        appStore.clear();
+        await secStore.clear('profile');
+        showStore();
+        notify.warn('Store cleared');
+    });
+</script>

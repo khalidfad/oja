@@ -1,0 +1,39 @@
+<!--
+  components/empty-state.html
+  Generic reusable empty state — works as Responder.component() target.
+
+  Data variables:
+    {{icon}}     — emoji or symbol (default: shown as-is)
+    {{title}}    — main message
+    {{subtitle}} — secondary message (optional)
+    {{action}}   — button label (optional)
+    {{actionUrl}}— button href (optional)
+
+  Usage:
+    // As Responder in each()
+    each(container, 'hosts', [], {
+        empty: Responder.component('components/empty-state.html', {
+            icon:     '🔍',
+            title:    'No hosts found',
+            subtitle: 'Try clearing your filters',
+        })
+    });
+
+    // As Responder in router.NotFound()
+    router.NotFound(Responder.component('components/empty-state.html', {
+        icon:      '404',
+        title:     'Page not found',
+        actionUrl: '#/dashboard',
+        action:    'Go to Dashboard',
+    }));
+-->
+<div class="empty-state">
+    <div class="empty-icon">{{icon}}</div>
+    <p class="empty-title">{{title}}</p>
+
+    <!-- data-if hides this when subtitle is empty -->
+    <p class="empty-subtitle muted" data-if="subtitle">{{subtitle}}</p>
+
+    <!-- data-if hides action when not provided -->
+    <a class="btn-sm" data-if="actionUrl" data-bind="href:actionUrl">{{action}}</a>
+</div>

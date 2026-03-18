@@ -1,0 +1,51 @@
+<!--
+  components/nav-bar.html
+  Demonstrates: component.update() — navbar re-renders when auth state changes.
+  The shell index.html has a static navbar for SSR-like initial state.
+  This file shows the pattern for dynamic navbar content.
+
+  Data variables:
+    {{userName}}   — logged-in user's display name
+    {{userRole}}   — primary role badge
+    {{isAdmin}}    — boolean — shows admin indicator
+    {{version}}    — app version string
+
+  Usage:
+    // After login
+    await component.mount('#navbar', 'components/nav-bar.html', {
+        userName: auth.session.user()?.name,
+        isAdmin:  auth.hasRole('admin'),
+        version:  'v1.4.2',
+    });
+
+    // After session renew — flash highlight on user name
+    await component.update('#nav-user', { userName: newUser });
+-->
+<nav class="navbar" id="navbar">
+    <div class="brand">
+        <span class="brand-oja">Oja</span>
+        <span class="brand-example">Example</span>
+    </div>
+
+    <div class="nav-links">
+        <a href="#/dashboard" data-page="/dashboard">Dashboard</a>
+        <a href="#/hosts"     data-page="/hosts">Hosts</a>
+        <a href="#/firewall"  data-page="/firewall">Firewall</a>
+        <a href="#/logs"      data-page="/logs">Logs</a>
+        <a href="#/settings"  data-page="/settings">Settings</a>
+    </div>
+
+    <div class="nav-right">
+        <!-- component.update() targets #nav-user -->
+        <span id="nav-user" class="nav-user">
+            {{userName}}
+            {{if .isAdmin}}
+            <span class="badge badge-ok" style="font-size:10px">admin</span>
+            {{end}}
+        </span>
+
+        <span class="nav-version muted">{{version}}</span>
+        <button id="debug-btn"  class="btn-sm" title="Dump debug timeline">Debug</button>
+        <button id="logout-btn" class="btn-sm danger">Logout</button>
+    </div>
+</nav>

@@ -1,0 +1,151 @@
+<!--
+  pages/host-detail.html
+  Demonstrates: router params ({id}), ctx data passed via Responder.fn,
+                modal.push/pop cascading, modal.confirm, component.update
+-->
+<div class="page" data-title="{{hostname}}">
+
+    <div class="page-header">
+        <a href="#/hosts" class="back-link">← Hosts</a>
+        <h1>{{hostname}}</h1>
+        <div class="header-actions">
+            <span class="badge {{if .alive}}badge-alive{{else}}badge-dead{{end}}">
+                {{if .alive}}● Online{{else}}● Offline{{end}}
+            </span>
+            <button id="perf-btn" class="btn-sm">📈 Performance</button>
+        </div>
+    </div>
+
+    <div class="detail-grid">
+        <div class="detail-card">
+            <div class="detail-label">TLS Mode</div>
+            <div class="detail-value">
+                {{if .tls}}
+                {{tlsMode}} — {{tlsDaysLeft}} days remaining
+                {{else}}
+                No TLS
+                {{end}}
+            </div>
+        </div>
+        <div class="detail-card">
+            <div class="detail-label">Total Requests</div>
+            <div class="detail-value">{{totalReqs}}</div>
+        </div>
+        <div class="detail-card">
+            <div class="detail-label">Errors</div>
+            <div class="detail-value">{{errors}}</div>
+        </div>
+        <div class="detail-card">
+            <div class="detail-label">p99 Latency</div>
+            <div class="detail-value">{{p99Ms}}ms</div>
+        </div>
+    </div>
+
+    <h2>Routes & Backends</h2>
+
+    <div id="routesList">
+        <template data-each="routes" data-as="route">
+            <div class="route-card">
+                <div class="route-header">
+                    <strong>{{route.path}}</strong>
+                    <span class="badge">{{route.method}}</span>
+                </div>
+
+                <!-- Nested backends -->
+                <template data-each="backends" data-as="be">
+                    <div class="backend-row" data-if-class="be.alive:be-alive">
+                        <span class="be-dot" data-if-class="be.alive:dot-green"></span>
+                        <span class="be-url">{{be.url}}</span>
+                        <span class="muted">W:{{be.weight}}</span>
+                        <span class="muted">{{be.reqs}} reqs</span>
+                        <span class="muted">p99: {{be.p99}}ms</span>
+                        <button class="btn-sm danger"
+                                data-action="remove-backend"
+                                data-url="{{be.url}}">Remove</button>
+                    </div>
+                </template>
+                <div data-empty="backends" class="muted" style="display:none">No backends</div>
+            </div>
+        </template>
+        <div data-empty="routes" class="empty-state" style="display:none">
+            No routes configured
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { each, fill }  from '../../src/js/template.js';
+    import { modal }       from '../../src/js/modal.js';
+    import { notify }      from '../../src/js/notify.js';
+    import { component }   from '../../src/js/component.js';
+    import { on }          from '../../src/js/events.js';
+
+    // ctx.host was attached by the loader middleware in app.js
+    // and passed through Responder.fn → component data
+    const container  = document.getElementById('routesList');
+    const hostData   = window._currentHost; // set below
+
+    // Render routes + nested backends
+    function renderRoutes(host) {
+        each(container, 'routes', host.routes || [], {
+            map: r => ({ ...r })
+        });
+
+        // Render nested backends for each route card
+        document.querySelectorAll('.route-card').forEach((card, i) => {
+            const route = host.routes?.[i];
+            if (route) {
+                each(card, 'backends', route.backends || []);
+            }
+        });
+    }
+
+    // Get the host data from the page's own data attributes
+    // (filled by Responder.component via template.js fill())
+    const hostnameEl = document.querySelector('h1');
+    if (hostnameEl) {
+        // Re-use what was rendered — find host from page data
+        // In a real app this would come from ctx.host in the middleware
+    }
+
+    // Performance modal — demonstrates modal.push() / modal.pop()
+    on('#perf-btn', 'click', () => {
+        document.getElementById('perfModalTitle').textContent =
+            'Performance: ' + document.querySelector('h1')?.textContent;
+
+        modal.push('perfModal', {
+            body: {
+                render: (container) => {
+                    container.innerHTML = `
+                    <div class="perf-grid">
+                        <div class="perf-item">
+                            <div class="perf-label">p99 Latency</div>
+                            <div class="perf-value">${document.getElementById('stat-p99')?.textContent || '—'}</div>
+                        </div>
+                        <div class="perf-item">
+                            <div class="perf-label">Requests</div>
+                            <div class="perf-value">${document.querySelector('.detail-value')?.textContent || '—'}</div>
+                        </div>
+                    </div>
+                    <p class="muted" style="margin-top:16px">
+                        In a real app this would show historical charts via adapter.use('d3') or adapter.use('chart').
+                    </p>
+                `;
+                }
+            }
+        });
+    });
+
+    // Backend removal — demonstrates modal.confirm() + component.remove()
+    on('[data-action="remove-backend"]', 'click', async (e, el) => {
+        const url = el.dataset.url;
+        const confirmed = await modal.confirm(`Remove backend ${url}?`);
+        if (!confirmed) return;
+
+        const row = el.closest('.backend-row');
+        if (row) {
+            await component.remove(row);
+            notify.success(`Backend ${url} removed`);
+        }
+    });
+</script>

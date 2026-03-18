@@ -1,0 +1,104 @@
+<!--
+  components/backend-detail.html
+  Backend detail drawer body — loaded by modal.push() from host-detail page.
+  Demonstrates: modal stack level 2 (route drawer → backend drawer),
+                component.update(), data-if, data-if-class, {{if}}, {{range}}
+
+  Data variables:
+    {{url}}          — backend address
+    {{alive}}        — boolean
+    {{weight}}       — load balancer weight
+    {{reqs}}         — total requests
+    {{p99}}          — p99 latency ms
+    {{failures}}     — failure count
+    {{inFlight}}     — currently in-flight requests
+    {{healthStatus}} — 'Healthy' | 'Degraded' | 'Dead' | 'Unknown'
+    {{routePath}}    — parent route path
+    {{hostname}}     — parent host
+
+  Usage from host-detail.html:
+    modal.push('backendDrawer', {
+        body: Responder.component('components/backend-detail.html', backendData)
+    });
+-->
+<div class="backend-detail">
+
+    <!-- Status header -->
+    <div class="be-detail-header">
+        <div class="be-status-row">
+            <span class="be-dot-large"
+                  data-if-class="alive:dot-green"></span>
+            <code class="be-url-large">{{url}}</code>
+            <span class="badge {{if .alive}}badge-ok{{else}}badge-danger{{end}}">
+                {{healthStatus}}
+            </span>
+        </div>
+        <p class="muted">
+            {{hostname}} → {{routePath}}
+        </p>
+    </div>
+
+    <!-- Stat grid -->
+    <div class="detail-grid" style="margin-top:16px">
+        <div class="detail-card">
+            <div class="detail-label">Total Requests</div>
+            <div class="detail-value">{{reqs}}</div>
+        </div>
+        <div class="detail-card">
+            <div class="detail-label">p99 Latency</div>
+            <div class="detail-value">{{p99}}ms</div>
+        </div>
+        <div class="detail-card">
+            <div class="detail-label">Failures</div>
+            <div class="detail-value" data-if-class="failures:perf-danger">
+                {{failures}}
+            </div>
+        </div>
+        <div class="detail-card">
+            <div class="detail-label">In Flight</div>
+            <div class="detail-value">{{inFlight}}</div>
+        </div>
+        <div class="detail-card">
+            <div class="detail-label">Weight</div>
+            <div class="detail-value">{{weight}}</div>
+        </div>
+        <div class="detail-card">
+            <div class="detail-label">Status</div>
+            <div class="detail-value">{{healthStatus}}</div>
+        </div>
+    </div>
+
+    <!-- Health check info -->
+    <div class="be-section">
+        <h4>Health Check</h4>
+        {{if .healthCheck}}
+        <div class="kv-list">
+            <div class="kv-row">
+                <span class="kv-key">Path</span>
+                <code class="kv-val">{{healthCheck.path}}</code>
+            </div>
+            <div class="kv-row">
+                <span class="kv-key">Interval</span>
+                <span class="kv-val">{{healthCheck.interval}}</span>
+            </div>
+            <div class="kv-row">
+                <span class="kv-key">Threshold</span>
+                <span class="kv-val">{{healthCheck.threshold}}</span>
+            </div>
+        </div>
+        {{else}}
+        <p class="muted">No health check configured</p>
+        {{end}}
+    </div>
+
+    <!-- Actions -->
+    <div class="be-actions">
+        <button class="btn danger"
+                data-action="remove-backend"
+                data-bind="data-url:url">
+            Remove Backend
+        </button>
+        <button class="btn" data-action="modal-close">Close</button>
+    </div>
+
+</div>

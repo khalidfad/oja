@@ -1,0 +1,153 @@
+<!--
+  pages/logs.html
+  Demonstrates: OjaSSE (simulated), logger, debug, chunked rendering,
+                notify.on(), filter chips
+-->
+<div class="page" data-title="Logs">
+    <div class="page-header">
+        <h1>Logs</h1>
+        <div class="header-actions">
+            <div class="filter-chips">
+                <button class="chip active" data-level="ALL">ALL</button>
+                <button class="chip" data-level="INFO">INFO</button>
+                <button class="chip" data-level="WARN">WARN</button>
+                <button class="chip" data-level="ERROR">ERROR</button>
+            </div>
+            <button id="pause-btn"  class="btn-sm">Pause</button>
+            <button id="clear-btn"  class="btn-sm">Clear</button>
+            <button id="export-btn" class="btn-sm">Export</button>
+        </div>
+    </div>
+
+    <div id="logConsole" class="log-console">
+        <div data-loading="logs" class="loading-row">Connecting to log stream...</div>
+
+        <template data-each="logs" data-as="log">
+            <div class="log-entry log-{{log.level | lower}}">
+                <span class="log-ts">{{log.ts}}</span>
+                <span class="log-level">{{log.level}}</span>
+                <span class="log-msg">{{log.msg}}
+                    {{if .log.method}}<span class="log-method">{{log.method}}</span>{{end}}
+                    {{if .log.path}}<span class="log-path">{{log.path}}</span>{{end}}
+                    {{if .log.status}}<span class="log-status">{{log.status}}</span>{{end}}
+                    {{if .log.duration}}<span class="log-dur muted">{{log.duration}}</span>{{end}}
+                </span>
+                <span class="log-remote muted">{{log.remote}}</span>
+            </div>
+        </template>
+        <div data-empty="logs" style="display:none" class="empty-state">
+            <p>No log entries</p>
+        </div>
+    </div>
+
+    <div class="log-footer">
+        <span id="log-count" class="muted">0 entries</span>
+        <span id="sse-status" class="muted">● Connecting...</span>
+    </div>
+</div>
+
+<script type="module">
+    import { each }    from '../../src/js/template.js';
+    import { notify }  from '../../src/js/notify.js';
+    import { logger }  from '../../src/js/logger.js';
+    import { debug }   from '../../src/js/debug.js';
+    import { on }      from '../../src/js/events.js';
+    import { api }     from '../app.js';
+
+    const container = document.getElementById('logConsole');
+    const statusEl  = document.getElementById('sse-status');
+    const countEl   = document.getElementById('log-count');
+
+    let _logs    = [];
+    let _paused  = false;
+    let _filter  = 'ALL';
+    let _sseTimer= null;
+
+    function render() {
+        const filtered = _filter === 'ALL'
+            ? _logs
+            : _logs.filter(l => l.level === _filter);
+
+        each(container, 'logs', filtered, {
+            chunk: 20,
+            empty: null,
+        });
+
+        if (countEl) countEl.textContent = `${filtered.length} entries`;
+    }
+
+    // Load initial logs
+    const initial = await api.get('/api/logs');
+    if (initial) {
+        _logs = initial;
+        render();
+    }
+
+    // Simulate SSE — in a real app this would be:
+    // const sse = new OjaSSE('/api/events');
+    // sse.on('log', (entry) => { ... });
+    // Here we simulate it with setInterval
+    statusEl.textContent = '● Connected (simulated SSE)';
+    statusEl.style.color = '#2ecc71';
+
+    const logMessages = [
+        { level: 'INFO',  msg: 'Request completed',   method: 'GET',  path: '/v1/health', status: 200, duration: '8ms',  remote: '10.0.0.1' },
+        { level: 'WARN',  msg: 'Rate limit warning',  method: 'POST', path: '/v1/login',  status: 429, duration: '2ms',  remote: '5.5.5.5'  },
+        { level: 'INFO',  msg: 'TLS renewed',          method: '',     path: '',           status: 0,   duration: '',     remote: ''         },
+        { level: 'ERROR', msg: 'Backend timeout',      method: 'GET',  path: '/v1/data',  status: 504, duration: '30s',  remote: '10.0.0.2' },
+    ];
+    let _msgIdx = 0;
+
+    _sseTimer = setInterval(() => {
+        if (_paused) return;
+        const entry = {
+            ...logMessages[_msgIdx % logMessages.length],
+            ts: new Date().toLocaleTimeString(),
+        };
+        _msgIdx++;
+        _logs.unshift(entry);
+        if (_logs.length > 200) _logs.pop();
+
+        render();
+        logger.debug('logs', 'New log entry', { level: entry.level });
+
+        if (entry.level === 'ERROR') {
+            notify.warn(`Error: ${entry.msg}`);
+        }
+    }, 2000);
+
+    // Cleanup on navigate away
+    document.addEventListener('oja:navigate', () => clearInterval(_sseTimer), { once: true });
+
+    // Controls
+    on('.chip', 'click', (e, el) => {
+        document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+        el.classList.add('active');
+        _filter = el.dataset.level;
+        render();
+    });
+
+    on('#pause-btn', 'click', (e, el) => {
+        _paused = !_paused;
+        el.textContent     = _paused ? 'Resume' : 'Pause';
+        statusEl.textContent = _paused ? '● Paused' : '● Connected (simulated SSE)';
+        statusEl.style.color = _paused ? '#e74c3c' : '#2ecc71';
+    });
+
+    on('#clear-btn', 'click', () => {
+        _logs = [];
+        render();
+        notify.info('Logs cleared');
+    });
+
+    on('#export-btn', 'click', () => {
+        const blob = new Blob([JSON.stringify(_logs, null, 2)], { type: 'application/json' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = 'oja-logs.json';
+        a.click();
+        URL.revokeObjectURL(url);
+        notify.success('Logs exported');
+    });
+</script>

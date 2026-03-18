@@ -1,0 +1,44 @@
+<!--
+  components/confirm-modal.html
+  Reusable confirmation modal — used by modal.confirm() helper.
+
+  Demonstrates:
+    - modal.confirm() promise-based API
+    - data-confirm-ok / data-confirm-cancel convention
+    - data-modal-field for dynamic content injection
+    - modal stack integration (Escape closes it)
+
+  This overlay is declared in index.html so it's always present in the DOM.
+  modal.confirm() finds it by #confirmModal and populates [data-modal-field].
+
+  Usage:
+    // Programmatic — returns Promise<bool>
+    const ok = await modal.confirm('Delete this rule?');
+    if (ok) await api.delete('/api/firewall?ip=' + ip);
+
+    // With custom modal ID
+    const ok = await modal.confirm('Archive host?', { modalId: 'archiveModal' });
+
+  HTML structure required by modal.confirm():
+    - #confirmModal         — the overlay element
+    - [data-modal-field="message"] — where the message is injected
+    - [data-confirm-ok]     — confirm button
+    - [data-confirm-cancel] — cancel button
+-->
+<div class="modal-overlay" id="confirmModal">
+    <div class="modal-box">
+
+        <!-- modal.confirm() injects message text here -->
+        <p id="confirmText"
+           data-modal-field="message"
+           class="modal-msg">
+            Are you sure?
+        </p>
+
+        <div class="modal-actions">
+            <button data-confirm-ok class="btn danger">Confirm</button>
+            <button data-confirm-cancel class="btn">Cancel</button>
+        </div>
+
+    </div>
+</div>

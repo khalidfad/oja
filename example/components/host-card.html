@@ -1,0 +1,118 @@
+<!--
+  components/host-card.html
+  Extracted host card — loaded via component.mount() to show the pattern.
+  This is the same data as the inline template in hosts.html but as a
+  standalone file a UI developer can open and edit independently.
+
+  Demonstrates:
+    - component.mount() with data
+    - Go-style {{if}}/{{else}}/{{end}} inline conditionals
+    - {{range}} for nested arrays
+    - data-if-class for conditional CSS
+    - data-bind for dynamic attributes
+    - Filters: | bytes, | lower
+
+  Data variables:
+    {{hostname}}       — host FQDN
+    {{id}}             — host ID for URL building
+    {{alive}}          — boolean
+    {{tls}}            — boolean
+    {{tlsMode}}        — 'auto' | 'local' | 'none'
+    {{tlsDaysLeft}}    — number or null
+    {{totalReqs}}      — number
+    {{errors}}         — number
+    {{p99Ms}}          — number
+    {{activeBackends}} — number
+    {{domains}}        — array of strings
+    routes[]
+      {{route.path}}
+      {{route.method}}
+      {{route.backendCount}}
+
+  Usage:
+    // Mount a single card
+    await component.mount('#hostSlot', 'components/host-card.html', hostData);
+
+    // Add a new card with enter animation
+    await component.add('#hostsGrid', 'components/host-card.html', hostData);
+
+    // Update existing card (flash highlight)
+    await component.update('#host-api-example-com', newData);
+-->
+<div class="host-card"
+     data-if-class="alive:host-alive"
+     data-bind="id:domId">
+
+    <!-- Header row -->
+    <div class="host-header">
+        <div class="host-info">
+            <span class="host-dot" data-if-class="alive:dot-green"></span>
+            <strong class="host-name">{{hostname}}</strong>
+
+            <!-- TLS badge — Go-style inline if/else -->
+            <span class="badge {{if .tls}}badge-tls{{else}}badge-no-tls{{end}}">
+                {{if .tls}}🔒 {{tlsMode}}{{else}}No TLS{{end}}
+            </span>
+
+            <!-- Expiry warning — only shown when tlsDaysLeft is set -->
+            {{if .tlsDaysLeft}}
+            <span class="badge" data-if-class="tlsDaysLeft:badge-warn">
+                {{tlsDaysLeft}}d left
+            </span>
+            {{end}}
+
+            <!-- Error badge — only shown when errors > 0 -->
+            {{if .errors}}
+            <span class="badge badge-danger">{{errors}} errors</span>
+            {{end}}
+        </div>
+
+        <div class="host-actions">
+            <a class="btn-sm" data-bind="href:detailUrl">Detail →</a>
+        </div>
+    </div>
+
+    <!-- Domain aliases -->
+    <div class="host-meta">
+        {{range .domains}}
+        <span class="domain-badge">{{.}}</span>
+        {{end}}
+    </div>
+
+    <!-- Stats row -->
+    <div class="host-stats">
+        <span><strong>{{totalReqs | bytes}}</strong> reqs</span>
+        <span><strong>{{p99Ms}}ms</strong> p99</span>
+        <span><strong>{{activeBackends}}</strong> backends</span>
+        <span class="muted">{{alive | status}}</span>
+    </div>
+
+    <!-- Routes list — nested loop -->
+    <div class="routes-list" data-if="hasRoutes">
+        {{range .routes}}
+        <div class="route-row">
+            <span class="route-method">{{.method}}</span>
+            <span class="route-path">{{.path}}</span>
+            <span class="muted">{{.backendCount}} backends</span>
+        </div>
+        {{else}}
+        <span class="muted">No routes configured</span>
+        {{end}}
+    </div>
+
+</div>
+
+<script type="module">
+    import { template } from '../../src/js/template.js';
+
+    // Register component-local filters
+    // These only need to exist when this component is rendered
+    template.filter('bytes', n => {
+        if (!n) return '0';
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+        return String(n);
+    });
+
+    template.filter('status', alive => alive ? '● online' : '● offline');
+</script>
