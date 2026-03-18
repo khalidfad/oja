@@ -25,13 +25,14 @@
  *   {{range .hosts}}{{.name}}{{end}}       → loop (dot = current item)
  *   {{range .hosts}}...{{else}}none{{end}} → loop with empty fallback
  *
- * ─── Mixed (the real power) ───────────────────────────────────────────────────
+ * ─── Path notation ────────────────────────────────────────────────────────────
  *
- *   <template data-each="hosts" data-as="h">
- *       <div class="host {{if .h.alive}}online{{else}}offline{{end}}">
- *           {{h.name | upper}} — {{h.tls | default "no TLS"}}
- *       </div>
- *   </template>
+ *   Oja supports both dot notation and bracket notation for accessing
+ *   nested data — including array indices:
+ *
+ *   {{user.name}}           → dot notation
+ *   {{hosts[0].status}}     → bracket notation (array index)
+ *   {{routes[0].backends[1].url}} → deeply nested
  *
  * ─── Loop context variables ───────────────────────────────────────────────────
  *
@@ -43,7 +44,7 @@
  *
  * ─── Filters ─────────────────────────────────────────────────────────────────
  *
- *   Built-in: upper, lower, title, json, date, time, default
+ *   Built-in: upper, lower, title, json, date, time, ago, default, trunc, bytes
  *   Custom:   template.filter('slug', s => s.toLowerCase().replace(/ /g,'-'))
  *   Usage:    {{.name | slug}} or {{.ts | date}} or {{.val | default "n/a"}}
  *
@@ -153,15 +154,10 @@ export function each(container, name, items = [], options = {}) {
 }
 
 // ─── Go-style block processor ─────────────────────────────────────────────────
-// Processes {{if}}, {{range}}, {{else}}, {{end}} as a string pre-processor
-// before HTML hits the DOM. Avoids fragile DOM surgery.
 
 function _processBlocks(html, data, escape) {
-    // Fast path — no Go syntax present
     if (!html.includes('{{')) return html;
-
-    const result = _evalTemplate(html, data, escape);
-    return result;
+    return _evalTemplate(html, data, escape);
 }
 
 function _evalTemplate(src, data, escape) {
@@ -176,12 +172,10 @@ function _evalTemplate(src, data, escape) {
             break;
         }
 
-        // Static text before {{
         if (open > i) out.push(src.slice(i, open));
 
         const close = src.indexOf('}}', open + 2);
         if (close === -1) {
-            // Unclosed — treat rest as static
             out.push(src.slice(open));
             break;
         }
@@ -196,7 +190,6 @@ function _evalTemplate(src, data, escape) {
             const val      = _resolve(data, pathStr);
             const truthy   = negated ? !val : !!val;
 
-            // Find matching {{else}} or {{end}} at same depth
             const { ifBody, elseBody, endIndex } = _extractBlock(src, i);
             i = endIndex;
 
@@ -208,8 +201,7 @@ function _evalTemplate(src, data, escape) {
         if (expr.startsWith('range ')) {
             const rangeExpr = expr.slice(6).trim();
 
-            // {{range $h := .hosts}} or {{range .hosts}}
-            let asVar  = '.';
+            let asVar   = '.';
             let pathStr = rangeExpr;
             const assignMatch = rangeExpr.match(/^\$?(\w+)\s*:=\s*(.+)$/);
             if (assignMatch) {
@@ -292,8 +284,8 @@ function _extractBlock(src, start) {
             depth--;
             if (depth === 0) {
                 const body    = src.slice(start, open);
-                const ifBody  = elseAt >= 0 ? src.slice(start, elseAt)         : body;
-                const elseBody= elseAt >= 0 ? src.slice(elseAt + 8, open)      : '';
+                const ifBody  = elseAt >= 0 ? src.slice(start, elseAt)    : body;
+                const elseBody= elseAt >= 0 ? src.slice(elseAt + 8, open) : '';
                 // 8 = length of "{{else}}"
                 return { ifBody, elseBody, endIndex: i };
             }
@@ -302,7 +294,6 @@ function _extractBlock(src, start) {
         }
     }
 
-    // Malformed — return everything as body
     return { ifBody: src.slice(start), elseBody: '', endIndex: len };
 }
 
@@ -389,7 +380,6 @@ function _renderBatch(container, tpl, name, asVar, list, mapFn) {
             Length: totalLen,
         };
 
-        // Process Go-style blocks in template HTML first
         const rawHTML   = tpl.innerHTML;
         const processed = render(rawHTML, ctx);
 
@@ -397,7 +387,6 @@ function _renderBatch(container, tpl, name, asVar, list, mapFn) {
         wrapper.innerHTML = processed;
         const clone     = wrapper.content.cloneNode(true);
 
-        // data-attribute directives on cloned DOM
         _walkDOM(clone, ctx);
 
         Array.from(clone.children).forEach(el => {
@@ -440,7 +429,6 @@ function _showSlot(slotEl, tpl, name, content, suffix) {
 
     if (!content) return;
 
-    // No slot in markup — inject one after the template
     const el = document.createElement('div');
     el.dataset[`eachEmpty`] = name;
     tpl.after(el);
@@ -451,19 +439,35 @@ function _applyContent(el, content) {
     if (typeof content === 'string') {
         el.innerHTML = content;
     } else if (content && typeof content.render === 'function') {
-        // Responder instance
         content.render(el);
     }
 }
 
 // ─── Path resolution ──────────────────────────────────────────────────────────
 
+/**
+ * Resolve a dot/bracket path expression against a data object.
+ *
+ * Supports:
+ *   user.name            → dot notation
+ *   hosts[0].status      → bracket notation with array index
+ *   routes[0].backends[1].url → deeply nested mixed notation
+ *   .name                → leading dot stripped (Go template style)
+ *
+ * @param {Object} data
+ * @param {string} expr
+ */
 function _resolve(data, expr) {
-    // Remove leading dot — {{.name}} and {{name}} are equivalent
+    // Strip leading dot or $ — {{.name}} and {{name}} are equivalent
     const path = expr.replace(/^\$?\./, '');
     if (!path) return data;
 
-    return path.split('.').reduce((acc, key) => {
+    // Split on dots AND brackets, filter empty strings from '][' or trailing ']'
+    // e.g. "hosts[0].status" → ["hosts", "0", "status"]
+    //      "routes[0].backends[1].url" → ["routes", "0", "backends", "1", "url"]
+    const keys = path.split(/\.|\[|\]/).filter(Boolean);
+
+    return keys.reduce((acc, key) => {
         if (acc === null || acc === undefined) return undefined;
         return acc[key];
     }, data);
@@ -483,9 +487,9 @@ function _esc(str) {
 function _timeAgo(ts) {
     if (!ts) return '';
     const secs = Math.floor((Date.now() - new Date(ts)) / 1000);
-    if (secs < 60)   return `${secs}s ago`;
-    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-    if (secs < 86400)return `${Math.floor(secs / 3600)}h ago`;
+    if (secs < 60)    return `${secs}s ago`;
+    if (secs < 3600)  return `${Math.floor(secs / 60)}m ago`;
+    if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
     return `${Math.floor(secs / 86400)}d ago`;
 }
 

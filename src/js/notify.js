@@ -45,14 +45,16 @@
  *
  * ─── Position ─────────────────────────────────────────────────────────────────
  *
- *   notify.setPosition('top-right');    // default
- *   notify.setPosition('bottom-right');
+ *   notify.setPosition('top-right');     // default
+ *   notify.setPosition('top-left');
  *   notify.setPosition('top-center');
+ *   notify.setPosition('bottom-right');
+ *   notify.setPosition('bottom-left');
  *   notify.setPosition('bottom-center');
  */
 
-import { listen } from './events.js';
-import { Responder } from './responder.js';
+import { listen, emit } from './events.js';
+import { Responder }    from './responder.js';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -133,17 +135,16 @@ export const notify = {
     /**
      * Show a persistent banner — one at a time, replaces previous.
      * Use for offline state, session warnings, system messages.
+     * Inserts at the very top of <body> above all other content.
      *
      *   notify.banner('⚠️ Connection lost', { type: 'warn' });
      */
     banner(message, options = {}) {
-        _ensureContainer();
-
-        // Remove existing banner
+        // Remove existing banner first
         _banner?.remove();
 
-        const type    = options.type || 'warn';
-        const meta    = TYPES[type] || TYPES.warn;
+        const type = options.type || 'warn';
+        const meta = TYPES[type] || TYPES.warn;
 
         _banner = document.createElement('div');
         _banner.className = `oja-banner oja-banner-${type}`;
@@ -167,7 +168,7 @@ export const notify = {
         _banner.querySelector('.oja-banner-dismiss')
             ?.addEventListener('click', () => notify.dismissBanner());
 
-        // Insert at top of body
+        // Always insert at the very top of body
         document.body.insertBefore(_banner, document.body.firstChild);
 
         emit('notify:banner', { message, type });
@@ -175,7 +176,7 @@ export const notify = {
     },
 
     /**
-     * Remove the current banner.
+     * Remove the current banner with a fade-out animation.
      */
     dismissBanner() {
         if (_banner) {
@@ -191,8 +192,10 @@ export const notify = {
     // ─── Position ─────────────────────────────────────────────────────────────
 
     /**
-     * Set toast position.
+     * Set toast position. Takes effect immediately if container exists.
      * 'top-right' | 'top-left' | 'top-center' | 'bottom-right' | 'bottom-left' | 'bottom-center'
+     *
+     * Default: 'top-right'
      */
     setPosition(position) {
         _position = position;
@@ -252,7 +255,7 @@ function _show(type, message, options = {}) {
 
     _container.appendChild(toast);
 
-    // Enter animation
+    // Trigger enter animation on next frame (allows CSS transition to play)
     requestAnimationFrame(() => toast.classList.add('oja-toast-visible'));
 
     // Auto-dismiss
@@ -281,7 +284,7 @@ async function _showResponder(responder, options = {}) {
 
     if (opts.dismissible) {
         const btn = document.createElement('button');
-        btn.className  = 'oja-toast-close';
+        btn.className   = 'oja-toast-close';
         btn.setAttribute('aria-label', 'Dismiss');
         btn.textContent = '✕';
         btn.addEventListener('click', () => _dismiss(toast));
@@ -322,8 +325,4 @@ function _esc(str) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
-}
-
-function emit(name, detail = {}) {
-    document.dispatchEvent(new CustomEvent(name, { detail }));
 }

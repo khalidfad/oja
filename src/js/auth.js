@@ -13,9 +13,11 @@
  *   auth.level('auditor',   () => auth.session.isActive() && auth.hasRole('auditor'));
  *
  *   // Session lifecycle hooks
- *   auth.session.OnStart(() => {
- *       api.setToken(auth.session.token());
- *       router.navigate('dashboard');
+ *   auth.session.OnStart(async (token) => {
+ *       api.setToken(token);
+ *       const dest = auth.session.intendedPath() || '/dashboard';
+ *       auth.session.clearIntendedPath();
+ *       router.navigate(dest);
  *   });
  *
  *   auth.session.OnRenew((newToken) => {
@@ -25,7 +27,7 @@
  *
  *   auth.session.OnExpiry(() => {
  *       notify.warn('Session expired');
- *       router.navigate('login');
+ *       router.navigate('/login');
  *   });
  *
  * ─── Router integration ───────────────────────────────────────────────────────
@@ -33,15 +35,11 @@
  *   // Auth levels plug directly into router middleware
  *   const r = new Router({ mode: 'hash', outlet: '#app' });
  *
- *   const protected = auth.middleware('protected');
- *   const admin     = auth.middleware('admin');
+ *   r.Get('/login', Responder.component('pages/login.html'));
  *
- *   r.Get('/login',     Responder.component('pages/login.html'));
- *   r.Get('/dashboard', [protected, Responder.component('pages/dashboard.html')]);
- *
- *   const adminGroup = r.Group('/admin');
- *   adminGroup.Use(admin);
- *   adminGroup.Get('/', Responder.component('pages/admin.html'));
+ *   const app = r.Group('/');
+ *   app.Use(auth.middleware('protected', '/login'));
+ *   app.Get('dashboard', Responder.component('pages/dashboard.html'));
  *
  * ─── Login / logout ───────────────────────────────────────────────────────────
  *
@@ -49,28 +47,30 @@
  *   await auth.session.start(jwt);
  *
  *   // Logout:
- *   auth.session.end();
- *   router.navigate('login');
+ *   await auth.session.end();
+ *   router.navigate('/login');
  *
  * ─── Reading session data ─────────────────────────────────────────────────────
  *
  *   auth.session.isActive()    // → true/false
- *   auth.session.token()       // → raw JWT string
+ *   auth.session.token()       // → raw JWT string (async, decrypted)
  *   auth.session.user()        // → decoded JWT payload
  *   auth.session.expiresIn()   // → ms until expiry
  *   auth.hasRole('admin')      // → true/false
  *   auth.hasClaim('sub', '42') // → true/false
  */
 
-import { Store } from './store.js';
+import { Store }       from './store.js';
 import { emit, listen } from './events.js';
 
 // ─── Token storage ────────────────────────────────────────────────────────────
 // Cascade: sessionStorage (encrypted) → localStorage (encrypted) → memory
-// Encrypted store — tokens never stored in plaintext
+// Token is encrypted at rest. Metadata (exp, payload) is stored unencrypted
+// in a separate store so synchronous reads (isActive, user) work without
+// needing to decrypt.
 
-const _tokenStore = new Store('oja:auth', { encrypt: true, prefer: 'session' });
-const _metaStore  = new Store('oja:auth:meta'); // non-sensitive session metadata
+const _tokenStore = new Store('oja:auth',      { encrypt: true, prefer: 'session' });
+const _metaStore  = new Store('oja:auth:meta');  // non-sensitive: exp, payload, intendedPath
 
 // ─── Level registry ───────────────────────────────────────────────────────────
 
@@ -78,11 +78,11 @@ const _levels = new Map(); // name → () => bool
 
 // ─── Session state ────────────────────────────────────────────────────────────
 
-let _expiryTimer    = null;
-let _warningTimer   = null;
-let _onStartHooks   = [];
-let _onRenewHooks   = [];
-let _onExpiryHooks  = [];
+let _expiryTimer   = null;
+let _warningTimer  = null;
+let _onStartHooks  = [];
+let _onRenewHooks  = [];
+let _onExpiryHooks = [];
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -104,7 +104,7 @@ export const auth = {
      * Returns a router middleware function for a named protection level.
      * On failure: stores the intended destination and redirects to login.
      *
-     *   adminGroup.Use(auth.middleware('admin'));
+     *   app.Use(auth.middleware('protected', '/login'));
      */
     middleware(levelName, redirectTo = '/login') {
         return async (ctx, next) => {
@@ -119,7 +119,6 @@ export const auth = {
                 // Save where the user was trying to go
                 _metaStore.set('intendedPath',   ctx.path);
                 _metaStore.set('intendedParams', ctx.params);
-
                 ctx.redirect(redirectTo);
                 return; // do not call next()
             }
@@ -202,6 +201,7 @@ export const auth = {
             await _tokenStore.clear('token');
             _metaStore.clear('exp');
             _metaStore.clear('startedAt');
+            _metaStore.clear('payload');
             emit('auth:end');
         },
 
@@ -231,48 +231,39 @@ export const auth = {
 
         /**
          * Is a session currently active?
-         * Checks token exists and has not expired.
+         * Checks that a session was started (exp exists in meta) and has not expired.
+         *
+         * Uses _metaStore (unencrypted) rather than reading the encrypted token
+         * directly — this avoids checking ciphertext that is always truthy.
          */
         isActive() {
-            const raw = _tokenStore._layer.get(_tokenStore._ns + 'token');
-            if (!raw) return false;
-
             const exp = _metaStore.get('exp');
-            if (exp && Date.now() >= exp) return false;
-
+            if (!exp) return false;                   // no session was ever started
+            if (Date.now() >= exp) return false;      // session has expired
             return true;
         },
 
         /**
-         * Retrieve the raw token string (decrypted).
+         * Retrieve the raw token string (async, decrypted).
+         * Use this when you need the actual JWT value, e.g. for api.setToken().
          */
         async token() {
             return _tokenStore.getAsync('token');
         },
 
         /**
-         * Synchronous token read — for headers, middleware.
-         * Returns the encrypted string — only useful for passing to api.js.
-         * Use token() for the decrypted value.
-         */
-        tokenSync() {
-            return _tokenStore._layer.get(_tokenStore._ns + 'token');
-        },
-
-        /**
          * Decoded JWT payload — claims, roles, user info.
-         * Returns null if not a JWT or not active.
+         * Reads from the unencrypted metadata cache set during session.start().
+         * Returns null if no active session.
          */
         user() {
-            const raw = _tokenStore._layer.get(_tokenStore._ns + 'token');
-            if (!raw) return null;
-            // Raw is encrypted in storage — we need the cached payload
+            if (!auth.session.isActive()) return null;
             return _metaStore.get('payload') || null;
         },
 
         /**
          * How many milliseconds until the session expires.
-         * Returns Infinity if no expiry set.
+         * Returns Infinity if no expiry is set.
          */
         expiresIn() {
             const exp = _metaStore.get('exp');
@@ -282,7 +273,7 @@ export const auth = {
 
         /**
          * The path the user was trying to reach before being redirected to login.
-         * Router calls this after successful login to resume navigation.
+         * Call this inside OnStart to resume navigation after login.
          */
         intendedPath() {
             return _metaStore.get('intendedPath') || null;
@@ -300,7 +291,7 @@ export const auth = {
          *
          *   auth.session.OnStart(async (token) => {
          *       api.setToken(token);
-         *       const dest = auth.session.intendedPath() || 'dashboard';
+         *       const dest = auth.session.intendedPath() || '/dashboard';
          *       auth.session.clearIntendedPath();
          *       router.navigate(dest);
          *   });
@@ -325,7 +316,7 @@ export const auth = {
          *
          *   auth.session.OnExpiry(() => {
          *       notify.warn('Session expired');
-         *       router.navigate('login');
+         *       router.navigate('/login');
          *   });
          */
         OnExpiry(fn) {
@@ -379,13 +370,23 @@ async function _handleExpiry() {
 }
 
 // ─── JWT decode ───────────────────────────────────────────────────────────────
+// Handles URL-safe base64 (replaces - and _), missing padding, and UTF-8
+// characters (accented letters, emoji) that atob() alone cannot decode.
 
 function _decodeJWT(token) {
     if (!token || typeof token !== 'string') return null;
     try {
         const parts = token.split('.');
         if (parts.length !== 3) return null;
-        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+
+        // Convert URL-safe base64 → standard base64, re-add stripped padding
+        const b64    = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const padded = b64.padEnd(b64.length + (4 - b64.length % 4) % 4, '=');
+
+        // Decode as bytes then UTF-8 — handles any Unicode in claims
+        const bytes   = Uint8Array.from(atob(padded), c => c.charCodeAt(0));
+        const payload = JSON.parse(new TextDecoder().decode(bytes));
+
         // Cache decoded payload for synchronous user() calls
         _metaStore.set('payload', payload);
         return payload;

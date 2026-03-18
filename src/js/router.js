@@ -28,35 +28,28 @@
  *   r.Get('/about',  Responder.component('pages/about.html'));
  *
  *   // Protected group — middleware applied to all routes inside
- *   const admin = r.Group('/admin');
- *   admin.Use(requireAuth);
- *   admin.Use(auditLog);
- *
- *   admin.Get('/',       Responder.component('pages/admin/dashboard.html'));
- *   admin.Get('/hosts',  Responder.component('pages/admin/hosts.html'));
- *   admin.Get('/logs',   Responder.component('pages/admin/logs.html'));
+ *   const app = r.Group('/');
+ *   app.Use(auth.middleware('protected', '/login'));
+ *   app.Get('dashboard', Responder.component('pages/dashboard.html'));
+ *   app.Get('hosts',     Responder.component('pages/hosts.html'));
  *
  *   // Nested group with URL params
- *   admin.Route('/hosts/{id}', host => {
+ *   app.Route('hosts/{id}', host => {
  *       host.Use(loadHostMiddleware);
- *       host.Get('/',        Responder.component('pages/hosts/detail.html'));
- *       host.Get('/metrics', Responder.component('pages/hosts/metrics.html'));
+ *       host.Get('/', Responder.component('pages/host-detail.html'));
  *   });
  *
  *   // Chain of responsibility on a single route
- *   r.Get('/audit', [requireAuth, requireAuditor, auditLog,
+ *   r.Get('/audit', [requireAuth, requireAuditor,
  *       Responder.component('pages/audit.html')
  *   ]);
  *
- *   // Error + not found
  *   r.NotFound(Responder.component('pages/404.html'));
- *   r.Error(Responder.component('pages/error.html'));
- *
- *   r.start('/login');  // default route if URL has none
+ *   r.start('/login');
  *
  * ─── Middleware pattern ────────────────────────────────────────────────────────
  *
- *   // Wrap — do work before AND after the route renders (like Go's middleware)
+ *   // Wrap — do work before AND after the route renders
  *   r.Use(async (ctx, next) => {
  *       ctx.startTime = Date.now();
  *       await next();
@@ -67,7 +60,7 @@
  *   const requireAuth = async (ctx, next) => {
  *       if (!auth.session.isActive()) {
  *           ctx.redirect('/login');
- *           return; // do not call next()
+ *           return;
  *       }
  *       await next();
  *   };
@@ -78,19 +71,19 @@
  *       await next();
  *   };
  *
- *   // Error boundary
- *   r.Use(async (ctx, next) => {
- *       try {
- *           await next();
- *       } catch (err) {
- *           await Responder.component('pages/error.html', { error: err.message })
- *               .render(document.querySelector(ctx.outlet));
- *       }
- *   });
+ * ─── Query string helpers ─────────────────────────────────────────────────────
+ *
+ *   // Update query params without triggering a full navigation.
+ *   // Useful for syncing filter/sort state to the URL so it's shareable.
+ *   router.setQuery({ filter: 'alive', sort: 'name' });
+ *
+ *   // Read current query params
+ *   router.params();  // → { filter: 'alive', sort: 'name', ...routeParams }
  */
 
-import { Store } from './store.js';
+import { Store }     from './store.js';
 import { Responder } from './responder.js';
+import { component } from './component.js';
 
 const _store = new Store('oja:router');
 
@@ -110,34 +103,37 @@ class _RouteNode {
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 export class Router {
-    constructor({ mode = 'hash', outlet = '#app' } = {}) {
-        this._mode              = mode;
-        this._outlet            = outlet;
-        this._root              = new _RouteNode();
-        this._globalMiddleware  = [];   // middleware for this scope
-        this._notFound          = Responder.html('<div class="oja-404"><h2>404</h2><p>Page not found</p></div>');
-        this._errorResponder    = Responder.html('<div class="oja-error"><h2>Error</h2><p>Something went wrong</p></div>');
-        this._current           = null;
-        this._currentNode       = null;
-        this._params            = {};
-        this._started           = false;
-        this._beforeEach        = [];   // global before hooks
-        this._afterEach         = [];   // global after hooks
+    /**
+     * @param {Object} options
+     *   mode    : 'hash' | 'path'  — URL strategy (default: 'hash')
+     *   outlet  : string           — CSS selector for page container (default: '#app')
+     *   loading : Responder        — shown immediately while page loads (default: none)
+     */
+    constructor({ mode = 'hash', outlet = '#app', loading = null } = {}) {
+        this._mode             = mode;
+        this._outlet           = outlet;
+        this._loadingResponder = loading;
+        this._root             = new _RouteNode();
+        this._globalMiddleware = [];
+        this._notFound         = Responder.html('<div class="oja-404"><h2>404</h2><p>Page not found</p></div>');
+        this._errorResponder   = Responder.html('<div class="oja-error"><h2>Error</h2><p>Something went wrong</p></div>');
+        this._current          = null;
+        this._params           = {};
+        this._started          = false;
+        this._beforeEach       = [];
+        this._afterEach        = [];
     }
 
     // ─── Middleware ───────────────────────────────────────────────────────────
 
     /**
      * Add middleware to this router/group scope.
-     * Middleware runs in order before the route's Responder renders.
+     * Runs in order before the route's Responder renders.
      * async (ctx, next) => { ... await next(); ... }
      */
     Use(...middlewares) {
-        // Flatten arrays — allows r.Use([mw1, mw2]) or r.Use(mw1, mw2)
         for (const mw of middlewares.flat()) {
-            if (typeof mw === 'function') {
-                this._globalMiddleware.push(mw);
-            }
+            if (typeof mw === 'function') this._globalMiddleware.push(mw);
         }
         return this;
     }
@@ -145,25 +141,16 @@ export class Router {
     // ─── Global hooks ─────────────────────────────────────────────────────────
 
     /** Called before every navigation — fn(ctx) */
-    beforeEach(fn) {
-        this._beforeEach.push(fn);
-        return this;
-    }
+    beforeEach(fn) { this._beforeEach.push(fn); return this; }
 
     /** Called after every navigation — fn(ctx) */
-    afterEach(fn) {
-        this._afterEach.push(fn);
-        return this;
-    }
+    afterEach(fn)  { this._afterEach.push(fn);  return this; }
 
     // ─── Route registration ───────────────────────────────────────────────────
 
     /**
-     * Register a GET route (browser navigation — all SPA routes are GET).
-     *
-     * responderOrChain can be:
-     *   - A Responder instance
-     *   - An array: [...middleware, Responder]  — route-local middleware chain
+     * Register a GET route.
+     * responderOrChain can be a Responder or [...middleware, Responder].
      */
     Get(pattern, responderOrChain) {
         const { responder, middleware } = _unwrapChain(responderOrChain);
@@ -171,21 +158,11 @@ export class Router {
         return this;
     }
 
-    /**
-     * Not found handler — shown when no route matches.
-     */
-    NotFound(responder) {
-        this._notFound = responder;
-        return this;
-    }
+    /** Not found handler — shown when no route matches. */
+    NotFound(responder) { this._notFound = responder; return this; }
 
-    /**
-     * Error handler — shown when a middleware or render throws.
-     */
-    Error(responder) {
-        this._errorResponder = responder;
-        return this;
-    }
+    /** Error handler — shown when middleware or render throws. */
+    Error(responder)    { this._errorResponder = responder; return this; }
 
     // ─── Grouping ─────────────────────────────────────────────────────────────
 
@@ -193,25 +170,17 @@ export class Router {
      * Create a scoped sub-router at a path prefix.
      * The group inherits parent middleware and can add its own.
      *
-     *   const admin = r.Group('/admin');
-     *   admin.Use(requireAuth);
-     *   admin.Get('/', Responder.component('dashboard.html'));
-     *
-     * Optional callback style:
-     *   r.Group('/admin', admin => {
-     *       admin.Use(requireAuth);
-     *       admin.Get('/', Responder.component('dashboard.html'));
-     *   });
+     *   const app = r.Group('/');
+     *   app.Use(auth.middleware('protected', '/login'));
+     *   app.Get('dashboard', Responder.component('pages/dashboard.html'));
      */
     Group(prefix, fn) {
-        const groupRoot   = this._findOrCreate(prefix);
-        const group       = new Router({ mode: this._mode, outlet: this._outlet });
-        group._root       = groupRoot;
-        // Group inherits parent middleware — its own Use() adds on top
+        const groupRoot = this._findOrCreate(prefix);
+        const group     = new Router({ mode: this._mode, outlet: this._outlet });
+        group._root             = groupRoot;
         group._globalMiddleware = [...this._globalMiddleware];
-        group._notFound   = this._notFound;
-        group._errorResponder = this._errorResponder;
-
+        group._notFound         = this._notFound;
+        group._errorResponder   = this._errorResponder;
         if (fn) fn(group);
         return group;
     }
@@ -219,20 +188,42 @@ export class Router {
     /**
      * Register a nested route block — used for URL param segments.
      *
-     *   admin.Route('/hosts/{id}', host => {
+     *   app.Route('hosts/{id}', host => {
      *       host.Use(loadHost);
-     *       host.Get('/',        Responder.component('detail.html'));
-     *       host.Get('/metrics', Responder.component('metrics.html'));
+     *       host.Get('/', Responder.component('pages/host-detail.html'));
      *   });
      */
     Route(pattern, fn) {
-        const node      = this._findOrCreate(pattern);
-        const sub       = new Router({ mode: this._mode, outlet: this._outlet });
-        sub._root       = node;
+        const node = this._findOrCreate(pattern);
+        const sub  = new Router({ mode: this._mode, outlet: this._outlet });
+        sub._root             = node;
         sub._globalMiddleware = [...this._globalMiddleware];
-        sub._notFound   = this._notFound;
-        sub._errorResponder = this._errorResponder;
+        sub._notFound         = this._notFound;
+        sub._errorResponder   = this._errorResponder;
         fn(sub);
+        return this;
+    }
+
+    // ─── Query string ─────────────────────────────────────────────────────────
+
+    /**
+     * Update URL query params without triggering a full navigation.
+     * Use to sync reactive filter/sort state to the URL so links are shareable.
+     *
+     *   // When filter state changes, update the URL
+     *   effect(() => router.setQuery({ filter: filter(), sort: sort() }));
+     *
+     *   // On page load, restore from URL
+     *   const { filter = 'ALL', sort = 'name' } = router.params();
+     */
+    setQuery(params = {}) {
+        if (!this._current) return this;
+        const qs  = _buildQuery(params);
+        const url = this._mode === 'hash'
+            ? '#' + this._current + (qs ? '?' + qs : '')
+            : this._current + (qs ? '?' + qs : '');
+        window.history.replaceState({ path: this._current, params }, '', url);
+        this._params = { ...this._params, ...params };
         return this;
     }
 
@@ -241,7 +232,6 @@ export class Router {
     _addRoute(pattern, responder, routeMiddleware = []) {
         const node = this._findOrCreate(pattern);
         node.responder  = responder;
-        // Route-local middleware stored on the node
         node.middleware = [...this._globalMiddleware, ...routeMiddleware];
     }
 
@@ -251,7 +241,6 @@ export class Router {
 
         for (const seg of segments) {
             if (seg.startsWith('{') && seg.endsWith('}')) {
-                // Param segment
                 if (!node.paramChild) {
                     node.paramChild           = new _RouteNode(seg);
                     node.paramChild.paramName = seg.slice(1, -1);
@@ -282,16 +271,12 @@ export class Router {
                 node = node.paramChild;
                 params[node.paramName] = decodeURIComponent(part);
             } else {
-                return null; // no match
+                return null;
             }
-
-            if (node.middleware.length) {
-                middleware.push(...node.middleware);
-            }
+            if (node.middleware.length) middleware.push(...node.middleware);
         }
 
         if (!node.responder) return null;
-
         return { responder: node.responder, params, middleware };
     }
 
@@ -320,19 +305,31 @@ export class Router {
 
     /**
      * Navigate to a path — updates URL, runs middleware chain, renders Responder.
+     * Automatically runs onUnmount hooks for the outgoing page and
+     * onMount hooks for the incoming page.
      */
     async navigate(path, options = {}) {
-        const [pathname, qs]  = path.split('?');
-        const query           = { ...options.query, ..._parseQuery(qs || '') };
+        const [pathname, qs] = path.split('?');
+        const query          = { ...options.query, ..._parseQuery(qs || '') };
 
-        // Push URL (unless replace mode)
-        if (!options._replace) {
-            this._pushURL(pathname, query);
+        if (!options._replace) this._pushURL(pathname, query);
+
+        // Emit navigate:start — ui.js and app code listen to this
+        document.dispatchEvent(new CustomEvent('oja:navigate:start', {
+            detail: { path: pathname }
+        }));
+
+        // Show loading Responder immediately — replaces blank gap
+        if (this._loadingResponder) {
+            const container = document.querySelector(this._outlet);
+            if (container) {
+                container.innerHTML = '';
+                await this._loadingResponder.render(container, {});
+            }
         }
 
         const match = this._match(pathname);
 
-        // Build context — available to every middleware and Responder
         const ctx = {
             path:     pathname,
             params:   {},
@@ -342,26 +339,27 @@ export class Router {
             replace:  (to, opts) => this.navigate(to, { ...opts, _replace: true }),
         };
 
+        // Run outgoing page teardown before anything renders
+        await component._runUnmount();
+
         if (!match) {
             for (const fn of this._beforeEach) await fn(ctx);
             await this._render(this._notFound, ctx);
             for (const fn of this._afterEach) await fn(ctx);
+            await component._runMount();
             return;
         }
 
         ctx.params = { ...match.params, ...query };
 
-        // Run beforeEach hooks
         for (const fn of this._beforeEach) {
             const stop = await fn(ctx);
             if (stop === false) return;
         }
 
-        // Build and run the onion middleware chain
+        // Build deduplicated middleware chain
         const allMiddleware = [...this._globalMiddleware, ...match.middleware];
-
-        // Deduplicate — groups can inherit parent middleware causing duplicates
-        const seen = new Set();
+        const seen  = new Set();
         const chain = allMiddleware.filter(mw => {
             if (seen.has(mw)) return false;
             seen.add(mw);
@@ -382,20 +380,14 @@ export class Router {
 
             const result = await mw(ctx, next);
 
-            // If middleware returned false or didn't call next — stop chain
-            if (result === false) {
-                stopped = true;
-                return;
-            }
+            if (result === false) { stopped = true; return; }
 
-            // If middleware returned a Responder — render it and stop
             if (Responder.is(result)) {
                 await this._render(result, ctx);
                 stopped = true;
                 return;
             }
 
-            // Middleware returned an object — merge into ctx
             if (result && typeof result === 'object' && !nextCalled) {
                 Object.assign(ctx, result);
                 await runChain(index + 1);
@@ -412,13 +404,11 @@ export class Router {
 
         if (stopped) return;
 
-        // Update state
         this._current = pathname;
         this._params  = ctx.params;
         _store.set('page', pathname);
         _store.set('params', ctx.params);
 
-        // Render the matched Responder
         try {
             await this._render(match.responder, ctx);
         } catch (err) {
@@ -427,14 +417,20 @@ export class Router {
             return;
         }
 
-        // Update nav + store
         this._updateNav(pathname);
 
-        // Run afterEach hooks
         for (const fn of this._afterEach) await fn(ctx);
 
-        // Notify listeners
+        // Run incoming page mount hooks after everything has rendered
+        await component._runMount();
+
+        // oja:navigate — legacy event, kept for compatibility
         document.dispatchEvent(new CustomEvent('oja:navigate', {
+            detail: { path: pathname, params: ctx.params }
+        }));
+
+        // oja:navigate:end — used by ui.js to restore loading states
+        document.dispatchEvent(new CustomEvent('oja:navigate:end', {
             detail: { path: pathname, params: ctx.params }
         }));
     }
@@ -446,7 +442,6 @@ export class Router {
             return;
         }
 
-        // Page leave animation
         container.classList.add('oja-leaving');
         await _wait(150);
         container.classList.remove('oja-leaving');
@@ -454,35 +449,24 @@ export class Router {
         container.innerHTML = '';
         await responder.render(container, ctx);
 
-        // Page enter animation
         container.classList.add('oja-entering');
         await _wait(50);
         container.classList.remove('oja-entering');
     }
 
-    /**
-     * Go back in browser history.
-     */
-    back() {
-        window.history.back();
-    }
+    /** Go back in browser history. */
+    back() { window.history.back(); }
 
-    /**
-     * Force re-render the current route — re-runs full middleware chain.
-     */
+    /** Force re-render the current route — re-runs full middleware chain. */
     async refresh() {
         if (!this._current) return;
         await this.navigate(this._current, { query: this._params, _replace: true });
     }
 
-    /**
-     * Navigate without adding a history entry.
-     */
+    /** Navigate without adding a history entry. */
     async replace(path, options = {}) {
         await this.navigate(path, { ...options, _replace: true });
     }
-
-    // ─── State ────────────────────────────────────────────────────────────────
 
     current() { return this._current; }
     params()  { return { ...this._params }; }
@@ -491,7 +475,7 @@ export class Router {
 
     _parseURL() {
         if (this._mode === 'hash') {
-            const hash  = window.location.hash.slice(1) || '';
+            const hash       = window.location.hash.slice(1) || '';
             const [path, qs] = hash.split('?');
             return { path: path || '', query: _parseQuery(qs || '') };
         } else {
@@ -503,9 +487,7 @@ export class Router {
 
     _buildURL(path, params = {}) {
         const qs = _buildQuery(params);
-        if (this._mode === 'hash') {
-            return '#' + path + (qs ? '?' + qs : '');
-        }
+        if (this._mode === 'hash') return '#' + path + (qs ? '?' + qs : '');
         return path + (qs ? '?' + qs : '');
     }
 
@@ -528,13 +510,12 @@ export class Router {
 
 // ─── Built-in middleware ──────────────────────────────────────────────────────
 
-/**
- * Timing middleware — logs render time for every route.
- *
- *   r.Use(Router.middleware.timing);
- */
 Router.middleware = {
 
+    /**
+     * Timing middleware — logs render time for every route.
+     *   r.Use(Router.middleware.timing);
+     */
     timing: async (ctx, next) => {
         const t = Date.now();
         await next();
@@ -543,11 +524,7 @@ Router.middleware = {
 
     /**
      * Error boundary — catches errors in the chain and renders error Responder.
-     * Pass your error Responder as the argument.
-     *
-     *   r.Use(Router.middleware.errorBoundary(
-     *       Responder.component('pages/error.html')
-     *   ));
+     *   r.Use(Router.middleware.errorBoundary(Responder.component('pages/error.html')));
      */
     errorBoundary: (errorResponder) => async (ctx, next) => {
         try {
@@ -561,7 +538,6 @@ Router.middleware = {
 
     /**
      * Scroll to top after every navigation.
-     *
      *   r.afterEach(Router.middleware.scrollTop);
      */
     scrollTop: async () => {
@@ -569,9 +545,8 @@ Router.middleware = {
     },
 
     /**
-     * Page title updater — reads data-title from the rendered page's first element.
-     *
-     *   r.afterEach(Router.middleware.pageTitle('My App'));
+     * Page title updater — reads data-title from the rendered page's root element.
+     *   r.afterEach(Router.middleware.pageTitle('Oja Example'));
      */
     pageTitle: (appName = '') => async (ctx) => {
         const container = document.querySelector(ctx.outlet);
@@ -588,7 +563,7 @@ function _segments(path) {
 
 function _unwrapChain(responderOrChain) {
     if (Array.isArray(responderOrChain)) {
-        const last = responderOrChain[responderOrChain.length - 1];
+        const last       = responderOrChain[responderOrChain.length - 1];
         const middleware = responderOrChain.slice(0, -1);
         return { responder: last, middleware };
     }

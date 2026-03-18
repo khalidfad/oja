@@ -28,6 +28,7 @@
  */
 
 import { render as templateRender, fill } from './template.js';
+import { execScripts }                    from './_exec.js';
 
 // ─── Cache for component HTML ─────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ async function _fetchHTML(url) {
 
 class _Responder {
     constructor(type, payload, options = {}) {
-        this.type    = type;
+        this.type     = type;
         this._payload = payload;
         this._options = options;
     }
@@ -88,6 +89,7 @@ class _HtmlResponder extends _Responder {
     }
     async render(container) {
         container.innerHTML = this._payload;
+        execScripts(container);
     }
 }
 
@@ -129,10 +131,10 @@ class _ImageResponder extends _Responder {
         const { alt = '', width = '', height = '', className = '' } = this._options;
         const img = document.createElement('img');
         img.src = this._payload;
-        if (alt)       img.alt         = alt;
-        if (width)     img.width        = width;
-        if (height)    img.height       = height;
-        if (className) img.className    = className;
+        if (alt)       img.alt       = alt;
+        if (width)     img.width     = width;
+        if (height)    img.height    = height;
+        if (className) img.className = className;
         img.style.maxWidth = '100%';
         container.innerHTML = '';
         container.appendChild(img);
@@ -147,10 +149,10 @@ class _LinkResponder extends _Responder {
     async render(container) {
         const { target = '_blank', className = '', rel = 'noopener noreferrer' } = this._options;
         const a = document.createElement('a');
-        a.href      = this._payload;
+        a.href        = this._payload;
         a.textContent = this._label;
-        a.target    = target;
-        a.rel       = rel;
+        a.target      = target;
+        a.rel         = rel;
         if (className) a.className = className;
         container.innerHTML = '';
         container.appendChild(a);
@@ -187,11 +189,15 @@ class _ComponentResponder extends _Responder {
                 }
             }
 
+            // Execute any <script> tags — innerHTML does not run scripts.
+            // Pass the component URL so relative imports resolve correctly.
+            execScripts(container, this._payload);
+
         } catch (e) {
             console.error(`[oja/responder] component load failed: ${this._payload}`, e);
 
             if (errorEl) {
-                errorEl.style.display   = '';
+                errorEl.style.display = '';
                 if (loadingEl) loadingEl.style.display = 'none';
             } else if (this._options.error) {
                 // Nested Responder for error state — no infinite recursion since
@@ -244,6 +250,7 @@ class _FnResponder extends _Responder {
             // If it returns an HTML string, inject it
             else if (typeof result === 'string') {
                 container.innerHTML = result;
+                execScripts(container);
             }
             // Otherwise the fn is expected to have mutated the container directly
         } catch (e) {

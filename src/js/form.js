@@ -1,6 +1,6 @@
 /**
  * oja/form.js
- * Form lifecycle — submit, error, reset, and image upload/preview.
+ * Form lifecycle — submit, validation, error display, reset, and image upload.
  * No schema. No magic. HTML stays pure.
  *
  * ─── Basic form ───────────────────────────────────────────────────────────────
@@ -12,6 +12,29 @@
  *       success: (res)  => router.navigate('/dashboard'),
  *       error:   (err)  => form.showError('#loginForm', 'password', err.message)
  *   });
+ *
+ * ─── Validation ───────────────────────────────────────────────────────────────
+ *
+ *   // form.validate() checks fields against rules before the API call.
+ *   // A rule returns true if valid, or an error string if invalid.
+ *   // Async rules are supported (e.g. checking if a username is taken).
+ *   // Returns true if all pass, false if any fail (errors shown inline).
+ *
+ *   form.on('#firewallForm', {
+ *       submit: async (data) => {
+ *           const ok = await form.validate('#firewallForm', {
+ *               ip:     (v) => /^\d+\.\d+\.\d+\.\d+(\/\d+)?$/.test(v) || 'Invalid IP or CIDR',
+ *               reason: (v) => v.length >= 5 || 'Reason must be at least 5 characters',
+ *           });
+ *           if (!ok) return;
+ *           return api.post('/api/firewall', data);
+ *       },
+ *       success: () => notify.success('Rule added'),
+ *       error:   (err) => notify.error(err.message),
+ *   });
+ *
+ *   // Or call standalone — useful when you need to validate on blur
+ *   const ok = await form.validate('#myForm', rules);
  *
  * ─── HTML (pure — no special attributes needed) ───────────────────────────────
  *
@@ -33,20 +56,18 @@
  *       accept     : ['image/jpeg', 'image/png'],
  *       onError    : (err) => notify.error(err),
  *       onSelect   : (file, dataUrl) => console.log('selected', file.name),
- *       crop       : false,   // future: canvas crop support
  *   });
  *
  *   // Multiple images
  *   form.images('#galleryInput', '#galleryPreview', {
- *       max       : 5,
- *       onSelect  : (files) => console.log(files.length, 'files selected'),
+ *       max      : 5,
+ *       onSelect : (files) => console.log(files.length, 'files selected'),
  *   });
  *
  * ─── File upload with progress ────────────────────────────────────────────────
  *
  *   form.upload('#uploadForm', {
  *       url      : '/api/upload',
- *       field    : 'file',              // input[name] to use as file field
  *       progress : (pct) => updateBar(pct),
  *       success  : (res) => notify.success('Uploaded'),
  *       error    : (err) => notify.error(err.message),
@@ -93,6 +114,54 @@ export const form = {
     },
 
     /**
+     * Validate form fields against a rules object.
+     * Each rule is a function: (value) => true | 'error message'
+     * Async rules are supported — useful for server-side checks.
+     * Returns true if all rules pass, false if any fail.
+     * Errors are shown inline using showError() — clears previous errors first.
+     *
+     *   const ok = await form.validate('#firewallForm', {
+     *       ip:     (v) => v.includes('.') || 'Invalid IP address',
+     *       reason: (v) => v.length >= 5   || 'Reason too short',
+     *       // async rule:
+     *       username: async (v) => {
+     *           const taken = await api.get(`/check-username?v=${v}`);
+     *           return !taken || 'Username already taken';
+     *       },
+     *   });
+     *   if (!ok) return; // errors already shown inline
+     */
+    async validate(target, rules = {}) {
+        const el = _resolve(target);
+        if (!el) return false;
+
+        form.clearErrors(el);
+
+        let valid = true;
+
+        for (const [field, ruleFn] of Object.entries(rules)) {
+            const input = el.querySelector(`[name="${field}"]`);
+            const value = input ? input.value : '';
+
+            try {
+                const result = await Promise.resolve(ruleFn(value));
+                if (result !== true) {
+                    // Rule returned an error string (or any falsy/non-true value)
+                    const message = typeof result === 'string' ? result : 'Invalid value';
+                    form.showError(el, field, message);
+                    valid = false;
+                }
+            } catch (e) {
+                // Async rule threw — treat as validation failure
+                form.showError(el, field, e.message || 'Validation error');
+                valid = false;
+            }
+        }
+
+        return valid;
+    },
+
+    /**
      * Collect all named field values as a plain object.
      * Checkboxes → boolean. Multi-selects → array. Numbers → number.
      */
@@ -126,6 +195,8 @@ export const form = {
     /**
      * Show an error message next to a named field.
      * Looks for <span data-field="name"> or <div data-field="name"> inside the form.
+     *
+     *   form.showError('#loginForm', 'password', 'Invalid credentials');
      */
     showError(target, fieldName, message) {
         const el = _resolve(target);
@@ -133,7 +204,7 @@ export const form = {
 
         const slot = el.querySelector(`[data-field="${fieldName}"]`);
         if (slot) {
-            slot.textContent = message;
+            slot.textContent   = message;
             slot.style.display = 'block';
             slot.classList.add('oja-field-error');
         }
@@ -144,7 +215,7 @@ export const form = {
         return this;
     },
 
-    /** Clear all error messages inside a form */
+    /** Clear all error messages inside a form. */
     clearErrors(target) {
         const el = _resolve(target);
         if (!el) return;
@@ -161,7 +232,7 @@ export const form = {
         return this;
     },
 
-    /** Disable all inputs and submit button — call during async submit */
+    /** Disable all inputs and submit button — called automatically during submit. */
     disable(target) {
         _resolve(target)
             ?.querySelectorAll('input, select, textarea, button')
@@ -169,7 +240,7 @@ export const form = {
         return this;
     },
 
-    /** Re-enable all inputs — call after submit completes */
+    /** Re-enable all inputs — called automatically after submit completes. */
     enable(target) {
         _resolve(target)
             ?.querySelectorAll('input, select, textarea, button')
@@ -177,7 +248,7 @@ export const form = {
         return this;
     },
 
-    /** Reset all fields to default values and clear errors */
+    /** Reset all fields to default values and clear errors. */
     reset(target) {
         const el = _resolve(target);
         if (!el) return;
@@ -221,7 +292,6 @@ export const form = {
             const file = input.files?.[0];
             if (!file) return;
 
-            // Validate type
             if (accept.length && !accept.includes(file.type)) {
                 const msg = `Invalid file type. Accepted: ${accept.join(', ')}`;
                 if (onError) onError(msg);
@@ -230,7 +300,6 @@ export const form = {
                 return;
             }
 
-            // Validate size
             if (file.size > maxSizeMb * 1024 * 1024) {
                 const msg = `File too large. Maximum: ${maxSizeMb}MB`;
                 if (onError) onError(msg);
@@ -239,7 +308,6 @@ export const form = {
                 return;
             }
 
-            // Read and show preview
             const dataUrl = await _readFile(file);
             preview.src = dataUrl;
             preview.style.display = '';
@@ -318,7 +386,6 @@ export const form = {
      *
      *   form.upload('#uploadForm', {
      *       url      : '/api/upload',
-     *       field    : 'file',
      *       headers  : { 'Authorization': 'Bearer ' + token },
      *       progress : (percent) => updateProgressBar(percent),
      *       success  : (res)     => notify.success('Uploaded'),
@@ -333,19 +400,17 @@ export const form = {
             e.preventDefault();
             form.disable(el);
 
-            const fd      = new FormData(el);
-            const xhr     = new XMLHttpRequest();
+            const fd  = new FormData(el);
+            const xhr = new XMLHttpRequest();
 
             xhr.open('POST', options.url || el.action || '/upload');
 
-            // Auth headers
             if (options.headers) {
                 for (const [k, v] of Object.entries(options.headers)) {
                     xhr.setRequestHeader(k, v);
                 }
             }
 
-            // Progress
             if (options.progress) {
                 xhr.upload.addEventListener('progress', (e) => {
                     if (e.lengthComputable) {
@@ -370,14 +435,10 @@ export const form = {
                 if (options.error) options.error(new Error('Network error'));
             });
 
-            xhr.addEventListener('abort', () => {
-                form.enable(el);
-            });
+            xhr.addEventListener('abort', () => form.enable(el));
 
             xhr.send(fd);
-
-            // Return xhr so caller can call xhr.abort() if needed
-            return xhr;
+            return xhr; // caller can call xhr.abort() if needed
         });
 
         return this;
