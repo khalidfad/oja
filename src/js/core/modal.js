@@ -220,6 +220,11 @@ export const modal = {
             if (bodyEl) data.body.render(bodyEl, data);
         }
 
+        if (data.footer && Out.is(data.footer)) {
+            const footerEl = el.querySelector('[data-modal-footer]');
+            if (footerEl) data.footer.render(footerEl, data);
+        }
+
         if (Object.keys(data).length > 0) _fillModal(el, data);
 
         _runHooks(id, 'open', data);

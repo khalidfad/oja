@@ -165,9 +165,15 @@ export class OjaWasm {
     }
 
     async _loadInWorker() {
-        // Serialize the imports — functions can't be transferred to workers,
-        // so we note which imports exist and reconstruct stubs in the worker.
-        // Real function imports must be handled differently — see docs.
+        // JS import functions cannot be transferred across thread boundaries —
+        // the structured clone algorithm does not support functions. Any imports
+        // declared via the `imports` option are therefore replaced with no-op
+        // stubs inside the worker. If your WASM module calls those imports at
+        // runtime, the stubs will log a warning and return undefined.
+        //
+        // Workaround: design your WASM modules to be import-free when running
+        // in worker mode, or use postMessage to route calls back to the main
+        // thread manually via the __call__ handler.
         const importNames = {};
         for (const [ns, fns] of Object.entries(this._imports)) {
             importNames[ns] = Object.keys(fns);

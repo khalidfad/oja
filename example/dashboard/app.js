@@ -19,19 +19,19 @@
 import './mock/api.js';
 
 // ── Oja imports ───────────────────────────────────────────────────────────────
-import { Router }            from '../src/js/core/router.js';
-import { Out }         from '../src/js/core/out.js';
-import { auth }              from '../src/js/core/auth.js';
-import { Api }               from '../src/js/core/api.js';
-import { notify }            from '../src/js/core/notify.js';
-import { modal }             from '../src/js/core/modal.js';
-import { component }         from '../src/js/core/component.js';
-import { logger }            from '../src/js/core/logger.js';
-import { debug }             from '../src/js/core/debug.js';
-import { adapter }           from '../src/js/core/adapter.js';
-import { Store }             from '../src/js/core/store.js';
-import { context, effect }   from '../src/js/core/reactive.js';
-import { on, listen, keys }  from '../src/js/core/events.js';
+import { Router }            from '../../src/js/core/router.js';
+import { Out }         from '../../src/js/core/out.js';
+import { auth }              from '../../src/js/core/auth.js';
+import { Api }               from '../../src/js/core/api.js';
+import { notify }            from '../../src/js/core/notify.js';
+import { modal }             from '../../src/js/core/modal.js';
+import { component }         from '../../src/js/core/component.js';
+import { logger }            from '../../src/js/core/logger.js';
+import { debug }             from '../../src/js/core/debug.js';
+import { adapter }           from '../../src/js/core/adapter.js';
+import { Store }             from '../../src/js/core/store.js';
+import { context, effect }   from '../../src/js/core/reactive.js';
+import { on, listen, keys }  from '../../src/js/core/events.js';
 
 // ── Debug ─────────────────────────────────────────────────────────────────────
 debug.enable('router,auth,api');

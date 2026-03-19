@@ -148,9 +148,11 @@ export const notify = {
 
         if (options.id) _banner.id = options.id;
 
+        const isOut = Out.is(message);
+
         _banner.innerHTML = `
             <span class="oja-banner-icon" aria-hidden="true">${meta.icon}</span>
-            <span class="oja-banner-msg">${_esc(message)}</span>
+            <span class="oja-banner-msg">${isOut ? '' : _esc(message)}</span>
             ${options.action
             ? `<button class="oja-banner-action">${_esc(options.action.label)}</button>`
             : ''}
@@ -158,6 +160,11 @@ export const notify = {
             ? `<button class="oja-banner-dismiss" aria-label="Dismiss">✕</button>`
             : ''}
         `;
+
+        if (isOut) {
+            const msgEl = _banner.querySelector('.oja-banner-msg');
+            message.render(msgEl);
+        }
 
         if (options.action) {
             _banner.querySelector('.oja-banner-action')?.addEventListener('click', (e) => {
@@ -175,9 +182,10 @@ export const notify = {
 
         document.body.insertBefore(_banner, document.body.firstChild);
 
-        if (options.announce !== false) _announce(message, meta.live);
+        const announceText = isOut && message.getText ? (message.getText() || '') : String(message);
+        if (options.announce !== false) _announce(announceText, meta.live);
 
-        emit('notify:banner', { message, type, id: _banner.id });
+        emit('notify:banner', { message: announceText, type, id: _banner.id });
         return this;
     },
 

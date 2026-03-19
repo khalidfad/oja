@@ -324,8 +324,9 @@ export const component = {
      * @param {string}         url     — path to .html component file
      * @param {Object}         data    — data for {{interpolation}}
      * @param {Object}         lists   — { listName: [items] } for data-each loops
+     * @param {Object}         options — { error: Out } — Out to render on load failure
      */
-    async mount(target, url, data = {}, lists = {}) {
+    async mount(target, url, data = {}, lists = {}, options = {}) {
         const start     = performance.now();
         const container = _resolve(target);
         if (!container) return;
@@ -364,6 +365,31 @@ export const component = {
             if (errorEl) {
                 errorEl.style.display = '';
                 if (loadingEl) loadingEl.style.display = 'none';
+            } else if (options.error) {
+                // Render the caller-supplied error Out into the container.
+                // Guard against double-fault: if the error Out is also a
+                // component and the failure was a network error, skip the
+                // fetch attempt and fall back to the inline string.
+                const isNetworkError   = e instanceof TypeError;
+                const errorIsComponent = options.error.type === 'component';
+
+                if (isNetworkError && errorIsComponent) {
+                    console.warn('[oja/component] network down — skipping component error Out to avoid double fetch');
+                    container.innerHTML = `<div class="oja-error" data-component="${url}">
+                        Failed to load component.
+                        <button onclick="this.closest('.oja-error').dispatchEvent(new CustomEvent('oja:retry',{bubbles:true}))">Retry</button>
+                    </div>`;
+                } else {
+                    try {
+                        await options.error.render(container, { error: e.message, url });
+                    } catch (e2) {
+                        console.error('[oja/component] error Out also threw:', e2);
+                        container.innerHTML = `<div class="oja-error" data-component="${url}">
+                            Failed to load component.
+                            <button onclick="this.closest('.oja-error').dispatchEvent(new CustomEvent('oja:retry',{bubbles:true}))">Retry</button>
+                        </div>`;
+                    }
+                }
             } else {
                 container.innerHTML = `<div class="oja-error" data-component="${url}">
                     Failed to load component.

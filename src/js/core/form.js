@@ -154,6 +154,8 @@
 
 // ─── Dirty tracking state ─────────────────────────────────────────────────────
 
+import { Out } from './out.js';
+
 const _dirtyState = new WeakMap(); // form -> Map<fieldName, { original, current, isDirty }>
 const _dirtyListeners = new WeakMap(); // form -> Set<function>
 const _fieldWatchers = new WeakMap(); // field -> Set<{ type, fn, debounced }>
@@ -1017,9 +1019,11 @@ export const form = {
 
     /**
      * Show an error message next to a named field.
+     * Accepts a plain string or an Out for rich error content.
      * Looks for <span data-field="name"> or <div data-field="name"> inside the form.
      *
      *   form.showError('#loginForm', 'password', 'Invalid credentials');
+     *   form.showError('#loginForm', 'email', Out.h('<strong>Email</strong> already in use'));
      */
     showError(target, fieldName, message) {
         const el = _resolve(target);
@@ -1027,7 +1031,12 @@ export const form = {
 
         const slot = el.querySelector(`[data-field="${fieldName}"]`);
         if (slot) {
-            slot.textContent = message;
+            if (Out.is(message)) {
+                slot.innerHTML = '';
+                message.render(slot);
+            } else {
+                slot.textContent = message;
+            }
             slot.style.display = 'block';
             slot.classList.add('oja-field-error');
         }
@@ -1053,7 +1062,7 @@ export const form = {
         if (!el) return;
 
         el.querySelectorAll('[data-field]').forEach(slot => {
-            slot.textContent = '';
+            slot.innerHTML = '';
             slot.style.display = 'none';
             slot.classList.remove('oja-field-error');
         });

@@ -177,8 +177,8 @@ export function fill(container, data = {}) {
  *   sort    : (a, b) => number
  *   map     : (item, index) => object
  *   chunk   : number              — render N per animation frame (non-blocking)
- *   empty   : string | Responder  — what to show when list is empty
- *   loading : string | Responder  — what to show while chunked render runs
+ *   empty   : string | Out        — what to show when list is empty
+ *   loading : string | Out        — what to show while chunked render runs
  */
 export function each(container, name, items = [], options = {}) {
     const tpl = container.querySelector(`template[data-each="${name}"]`);

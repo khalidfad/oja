@@ -392,22 +392,17 @@ export const webrtc = {
     },
 
     /**
-     * Simple one-liner connection
+     * Convenience wrapper for a full peer-to-peer connection.
+     * Not implemented — WebRTC signaling is application-specific and cannot
+     * be abstracted without knowing your transport (WebSocket, HTTP, etc.).
+     * Use createPeer(), createOffer()/createAnswer(), and setLocalDescription()
+     * / setRemoteDescription() directly with your own signaling transport.
      */
     async connect(targetId, options = {}) {
-        const {
-            onMessage = null,
-            onOpen = null,
-            onClose = null,
-            iceServers = DEFAULT_CONFIG.iceServers,
-        } = options;
-
-        // This is a placeholder - real implementation would need signaling
-        console.warn('[oja/webrtc] Simple connect requires signaling server');
-
+        console.warn('[oja/webrtc] connect() is not implemented — WebRTC requires a signaling server. Use createPeer(), createOffer(), and setLocalDescription() with your own signaling transport instead.');
         return {
-            send: (data) => console.warn('Not implemented without signaling'),
-            close: () => {},
+            send:  ()  => console.warn('[oja/webrtc] connect() stub — not implemented'),
+            close: ()  => {},
         };
     },
 
