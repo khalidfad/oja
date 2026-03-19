@@ -1,3 +1,4 @@
+// src/js/core/channel.js
 /**
  * oja/channel.js
  * Go-style channels for coordinating async work in JavaScript.
@@ -91,6 +92,13 @@ export class Channel {
     #mode;
     #workers   = null;
 
+    // Pending calls waiting for a worker response in worker mode.
+    // Keyed by a per-message id so concurrent sends and receives can be
+    // matched up correctly when postMessage responses arrive out of order.
+    #workerPending = new Map(); // id -> { resolve, reject }
+    #workerNextId  = 0;
+    #workerIndex   = 0; // round-robin pointer into #workers
+
     /**
      * @param {number|Object} options
      *   buffer   : number   — buffer size (default: 0 = unbuffered)
@@ -118,7 +126,6 @@ export class Channel {
         this.name       = name    || `chan-${Math.random().toString(36).slice(2, 8)}`;
         this._onError   = onError || null;
 
-        // Determine mode
         if (mode === 'worker' || workers) {
             if (this.#supportsWorkers()) {
                 this.#mode = 'worker';
@@ -149,12 +156,17 @@ export class Channel {
 
     /**
      * Send a value — like ch <- value in Go.
-     * Blocks (returns a Promise) if buffer is full and no receiver is waiting.
+     * In worker mode the value is routed through the worker pool.
+     * In async mode it blocks (returns a Promise) if buffer is full and
+     * no receiver is waiting.
      */
     async send(value) {
         if (this.#closed) throw new Error(`[oja/channel] send on closed channel: ${this.name}`);
 
-        // Direct handoff to waiting receiver
+        if (this.#mode === 'worker' && this.#workers?.length) {
+            return this.#workerSend(value);
+        }
+
         if (this.#receivers.length > 0) {
             const receiver = this.#receivers.shift();
             receiver.resolve({ value, ok: true });
@@ -162,14 +174,12 @@ export class Channel {
             return;
         }
 
-        // Buffer has space
         if (this.#buffer.length < this.bufferSize) {
             this.#buffer.push(value);
             debug.log('channel', 'send-buffered', { name: this.name, buffered: this.#buffer.length });
             return;
         }
 
-        // Sender blocks until a receiver is ready
         return new Promise((resolve) => {
             this.#senders.push({ value, resolve });
             debug.log('channel', 'send-waiting', { name: this.name });
@@ -179,18 +189,20 @@ export class Channel {
     /**
      * Receive a value — like value, ok := <-ch in Go.
      * Returns { value, ok: true } or { value: undefined, ok: false } when closed.
+     * In worker mode the receive is routed through the worker pool.
      * Blocks if no value is available.
      */
     async receive() {
-        // Channel closed and buffer drained
+        if (this.#mode === 'worker' && this.#workers?.length) {
+            return this.#workerReceive();
+        }
+
         if (this.#closed && this.#buffer.length === 0 && this.#senders.length === 0) {
             return { value: undefined, ok: false };
         }
 
-        // Take from buffer first
         if (this.#buffer.length > 0) {
             const value = this.#buffer.shift();
-            // Move a waiting sender into the buffer
             if (this.#senders.length > 0) {
                 const sender = this.#senders.shift();
                 this.#buffer.push(sender.value);
@@ -200,7 +212,6 @@ export class Channel {
             return { value, ok: true };
         }
 
-        // Direct handoff from waiting sender
         if (this.#senders.length > 0) {
             const sender = this.#senders.shift();
             sender.resolve();
@@ -208,7 +219,6 @@ export class Channel {
             return { value: sender.value, ok: true };
         }
 
-        // Receiver blocks until a sender arrives
         if (this.#closed) return { value: undefined, ok: false };
 
         return new Promise((resolve) => {
@@ -226,13 +236,17 @@ export class Channel {
         if (this.#closed) return;
         this.#closed = true;
 
-        // Unblock all waiting receivers
         for (const r of this.#receivers) {
             r.resolve({ value: undefined, ok: false });
         }
         this.#receivers = [];
 
-        // Terminate workers if in worker mode
+        // Reject any pending worker calls so callers are not left hanging.
+        for (const [, { reject }] of this.#workerPending) {
+            reject(new Error(`[oja/channel] channel closed: ${this.name}`));
+        }
+        this.#workerPending.clear();
+
         if (this.#workers) {
             for (const w of this.#workers) w.terminate();
             this.#workers = null;
@@ -264,7 +278,7 @@ export class Channel {
     get mode()    { return this.#mode; }
     get waiting() { return this.#receivers.length; }
 
-    // ─── Worker pool internals ────────────────────────────────────────────────
+    // ─── Worker pool ──────────────────────────────────────────────────────────
 
     #supportsWorkers() {
         return typeof Worker !== 'undefined';
@@ -276,15 +290,14 @@ export class Channel {
 
     #detectOptimalPoolSize() {
         const cores = navigator.hardwareConcurrency || 2;
-        // Leave one core free for the main thread, cap at 8
         return Math.max(1, Math.min(cores - 1, 8));
     }
 
     #initWorkers(count) {
-        // Worker pool for channel — these are raw Workers, not OjaWorkers.
-        // OjaWorker is for user code. Channel workers are internal coordination.
-        // The actual processing code lives in OjaWorker, not here.
-        // Channel workers handle the buffering and routing logic off-thread.
+        // Each worker runs the same buffering logic off the main thread.
+        // The worker maintains its own buffer, sender queue, and receiver queue,
+        // and responds to 'send' and 'receive' messages with acknowledgements.
+        // This offloads all channel coordination to the worker thread.
         const workerSrc = `
             const buffer    = [];
             const bufferMax = ${this.bufferSize};
@@ -299,6 +312,7 @@ export class Channel {
                     if (receivers.length > 0) {
                         const r = receivers.shift();
                         self.postMessage({ type: 'receive-ok', value, id: r.id });
+                        self.postMessage({ type: 'send-ok', id });
                     } else if (buffer.length < bufferMax) {
                         buffer.push(value);
                         self.postMessage({ type: 'send-ok', id });
@@ -338,8 +352,71 @@ export class Channel {
 
         const blob = new Blob([workerSrc], { type: 'text/javascript' });
         const url  = URL.createObjectURL(blob);
-        this.#workers = Array.from({ length: count }, () => new Worker(url));
+
+        this.#workers = Array.from({ length: count }, () => {
+            const w = new Worker(url);
+            w.onmessage = (e) => this.#handleWorkerMessage(e.data);
+            w.onerror   = (e) => {
+                console.error(`[oja/channel] worker error in ${this.name}:`, e);
+                if (this._onError) this._onError(e);
+            };
+            return w;
+        });
+
         URL.revokeObjectURL(url);
+    }
+
+    /**
+     * Route a send through the worker pool using round-robin dispatch.
+     * Returns a Promise that resolves when the worker acknowledges the send.
+     */
+    #workerSend(value) {
+        return new Promise((resolve, reject) => {
+            const id     = this.#workerNextId++;
+            const worker = this.#workers[this.#workerIndex % this.#workers.length];
+            this.#workerIndex++;
+            this.#workerPending.set(id, { resolve, reject, type: 'send' });
+            worker.postMessage({ type: 'send', value, id });
+        });
+    }
+
+    /**
+     * Route a receive through the worker pool using round-robin dispatch.
+     * Returns a Promise that resolves to { value, ok }.
+     */
+    #workerReceive() {
+        return new Promise((resolve, reject) => {
+            const id     = this.#workerNextId++;
+            const worker = this.#workers[this.#workerIndex % this.#workers.length];
+            this.#workerIndex++;
+            this.#workerPending.set(id, { resolve, reject, type: 'receive' });
+            worker.postMessage({ type: 'receive', id });
+        });
+    }
+
+    /**
+     * Dispatch incoming worker messages to the correct pending promise.
+     */
+    #handleWorkerMessage(msg) {
+        const { type, value, id } = msg;
+        const pending = this.#workerPending.get(id);
+        if (!pending) return;
+
+        this.#workerPending.delete(id);
+
+        switch (type) {
+            case 'send-ok':
+                pending.resolve();
+                break;
+            case 'receive-ok':
+                pending.resolve({ value, ok: true });
+                break;
+            case 'receive-closed':
+                pending.resolve({ value: undefined, ok: false });
+                break;
+            default:
+                pending.reject(new Error(`[oja/channel] unknown worker message type: ${type}`));
+        }
     }
 }
 
@@ -368,52 +445,70 @@ export function go(fn) {
  * Output of each stage becomes input of the next.
  * Returns the final output channel.
  *
+ * Each output channel is closed when its stage finishes draining, whether
+ * that is because the input closed normally or because a stage threw.
+ *
  *   const output = pipeline([resize, compress, upload], inputChannel);
  *   for await (const result of output) { displayResult(result); }
  */
 export function pipeline(stages, input) {
     let current = input;
+
     for (const stage of stages) {
-        const output = new Channel(input.bufferSize || 0);
-        const src    = current; // capture for closure
+        const output = new Channel(current.bufferSize || 0);
+        const src    = current;
+
         go(async () => {
-            for await (const item of src) {
-                try {
-                    const result = await stage(item);
-                    await output.send(result);
-                } catch (e) {
-                    console.error('[oja/channel] pipeline stage error:', e);
+            try {
+                for await (const item of src) {
+                    try {
+                        const result = await stage(item);
+                        await output.send(result);
+                    } catch (e) {
+                        console.error('[oja/channel] pipeline stage error:', e);
+                    }
                 }
+            } finally {
+                // Always close the output so downstream consumers are not left
+                // blocked on receive() when the input closes or a stage throws.
+                output.close();
             }
-            output.close();
         });
+
         current = output;
     }
+
     return current;
 }
 
 /**
  * fanOut — distribute items from one channel across N output channels.
  * Items are distributed round-robin.
+ * All output channels are closed when the input closes.
  *
  *   const [ch1, ch2, ch3] = fanOut(inputChannel, 3);
  */
 export function fanOut(input, count) {
     const outputs = Array.from({ length: count }, () => new Channel(input.bufferSize || 0));
     let i = 0;
+
     go(async () => {
-        for await (const item of input) {
-            await outputs[i % count].send(item);
-            i++;
+        try {
+            for await (const item of input) {
+                await outputs[i % count].send(item);
+                i++;
+            }
+        } finally {
+            outputs.forEach(ch => ch.close());
         }
-        outputs.forEach(ch => ch.close());
     });
+
     return outputs;
 }
 
 /**
  * fanIn — merge N channels into one output channel.
- * Output channel closes when all inputs are closed and drained.
+ * The output channel closes when all inputs are closed and drained.
  *
  *   const merged = fanIn([ch1, ch2, ch3]);
  */
@@ -423,11 +518,14 @@ export function fanIn(channels) {
 
     channels.forEach(ch => {
         go(async () => {
-            for await (const item of ch) {
-                await output.send(item);
+            try {
+                for await (const item of ch) {
+                    await output.send(item);
+                }
+            } finally {
+                active--;
+                if (active === 0) output.close();
             }
-            active--;
-            if (active === 0) output.close();
         });
     });
 
@@ -440,6 +538,7 @@ export const merge = fanIn;
 /**
  * split — divide channel items across outputs based on predicate functions.
  * First matching predicate wins. Unmatched items are dropped.
+ * All output channels are closed when the input closes.
  *
  *   const [errors, warnings, info] = split(logChannel, [
  *       (item) => item.level === 'ERROR',
@@ -449,16 +548,21 @@ export const merge = fanIn;
  */
 export function split(input, predicates) {
     const outputs = predicates.map(() => new Channel());
+
     go(async () => {
-        for await (const item of input) {
-            for (let i = 0; i < predicates.length; i++) {
-                if (predicates[i](item)) {
-                    await outputs[i].send(item);
-                    break;
+        try {
+            for await (const item of input) {
+                for (let i = 0; i < predicates.length; i++) {
+                    if (predicates[i](item)) {
+                        await outputs[i].send(item);
+                        break;
+                    }
                 }
             }
+        } finally {
+            outputs.forEach(ch => ch.close());
         }
-        outputs.forEach(ch => ch.close());
     });
+
     return outputs;
 }
