@@ -512,11 +512,13 @@ function _walkDOM(node, data) {
 
 // ─── Batch and chunked rendering ──────────────────────────────────────────────
 
-function _renderBatch(container, tpl, name, asVar, list, mapFn) {
+// startIndex and totalLen are supplied by _renderChunked so that Index/First/Last
+// reflect the item's position in the full list, not just the current chunk.
+function _renderBatch(container, tpl, name, asVar, list, mapFn, startIndex = 0, totalLen = list.length) {
     const fragment  = document.createDocumentFragment();
-    const totalLen  = list.length;
 
-    list.forEach((item, index) => {
+    list.forEach((item, chunkOffset) => {
+        const index = startIndex + chunkOffset;
         const data  = mapFn ? mapFn(item, index) : item;
         const ctx   = {
             ...data,
@@ -556,16 +558,17 @@ function _renderBatch(container, tpl, name, asVar, list, mapFn) {
 
 function _renderChunked(container, tpl, name, asVar, list, options) {
     const loadingEl = container.querySelector(`[data-loading="${name}"]`);
-    let index = 0;
+    const totalLen  = list.length;
+    let offset = 0;
 
     const next = () => {
-        const slice = list.slice(index, index + options.chunk);
+        const slice = list.slice(offset, offset + options.chunk);
         if (!slice.length) {
             if (loadingEl) loadingEl.style.display = 'none';
             return;
         }
-        _renderBatch(container, tpl, name, asVar, slice, options.map);
-        index += options.chunk;
+        _renderBatch(container, tpl, name, asVar, slice, options.map, offset, totalLen);
+        offset += options.chunk;
         requestAnimationFrame(next);
     };
 

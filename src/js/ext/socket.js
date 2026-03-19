@@ -51,7 +51,7 @@
  *   });
  */
 
-import { emit as _emit } from './events.js';
+import { emit as _emit } from '../core/events.js';
 
 // ─── Default JSON codec ───────────────────────────────────────────────────────
 

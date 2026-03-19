@@ -58,19 +58,19 @@ import { Out }          from './out.js';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-let _container  = null;
-let _banner     = null;
-let _position   = 'top-right';
-let _idCounter  = 0;
-let _announcer  = null;
+let _container = null;
+let _banner    = null;
+let _position  = 'top-right';
+let _idCounter = 0;
+let _announcer = null;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TYPES = {
-    success : { cls: 'oja-toast-success', icon: '✓', role: 'status', live: 'polite' },
-    error   : { cls: 'oja-toast-error',   icon: '✕', role: 'alert',  live: 'assertive' },
-    warn    : { cls: 'oja-toast-warn',    icon: '⚠', role: 'alert',  live: 'assertive' },
-    info    : { cls: 'oja-toast-info',    icon: 'ℹ', role: 'status', live: 'polite' },
+    success : { cls: 'oja-toast-success', icon: '✓', role: 'status',  live: 'polite'   },
+    error   : { cls: 'oja-toast-error',   icon: '✕', role: 'alert',   live: 'assertive' },
+    warn    : { cls: 'oja-toast-warn',    icon: '⚠', role: 'alert',   live: 'assertive' },
+    info    : { cls: 'oja-toast-info',    icon: 'ℹ', role: 'status',  live: 'polite'   },
 };
 
 const DEFAULTS = {
@@ -85,21 +85,10 @@ const DEFAULTS = {
 
 export const notify = {
 
-    success(message, options = {}) {
-        return _show('success', message, options);
-    },
-
-    error(message, options = {}) {
-        return _show('error', message, { duration: 6000, ...options });
-    },
-
-    warn(message, options = {}) {
-        return _show('warn', message, options);
-    },
-
-    info(message, options = {}) {
-        return _show('info', message, options);
-    },
+    success(message, options = {}) { return _show('success', message, options); },
+    error(message, options = {})   { return _show('error',   message, { duration: 6000, ...options }); },
+    warn(message, options = {})    { return _show('warn',    message, options); },
+    info(message, options = {})    { return _show('info',    message, options); },
 
     /**
      * Show an Out as a toast — for rich content.
@@ -107,9 +96,7 @@ export const notify = {
      *   notify.show(Out.h('<strong>Deploy</strong> complete — 3 hosts'));
      */
     show(responder, options = {}) {
-        if (!Out.is(responder)) {
-            return _show('info', String(responder), options);
-        }
+        if (!Out.is(responder)) return _show('info', String(responder), options);
         return _showResponder(responder, options);
     },
 
@@ -125,7 +112,6 @@ export const notify = {
 
     /**
      * Listen to a CustomEvent and run handler when it fires.
-     * Thin wrapper over events.js listen() — kept here for discoverability.
      *
      *   notify.on('api:offline', () => notify.banner('Connection lost'));
      */
@@ -137,18 +123,18 @@ export const notify = {
 
     /**
      * Show a persistent banner — one at a time, replaces previous.
-     * Use for offline state, session warnings, system messages.
-     * Inserts at the very top of <body> above all other content.
+     * The previous banner is fully removed before the new one is inserted
+     * so there is never a window where two banners are visible simultaneously.
      *
      *   notify.banner('⚠️ Connection lost', { type: 'warn' });
      */
     banner(message, options = {}) {
+        // Remove any existing banner synchronously before creating the new one.
+        // The previous implementation started a 200ms fade-out and then created
+        // the new banner immediately, leaving both visible during that window.
         if (_banner) {
-            _banner.classList.add('oja-banner-leaving');
-            setTimeout(() => {
-                _banner?.remove();
-                _banner = null;
-            }, 200);
+            _banner.remove();
+            _banner = null;
         }
 
         const type = options.type || 'warn';
@@ -160,9 +146,7 @@ export const notify = {
         _banner.setAttribute('aria-live', meta.live);
         _banner.setAttribute('aria-atomic', 'true');
 
-        if (options.id) {
-            _banner.id = options.id;
-        }
+        if (options.id) _banner.id = options.id;
 
         _banner.innerHTML = `
             <span class="oja-banner-icon" aria-hidden="true">${meta.icon}</span>
@@ -176,30 +160,22 @@ export const notify = {
         `;
 
         if (options.action) {
-            const actionBtn = _banner.querySelector('.oja-banner-action');
-            actionBtn?.addEventListener('click', (e) => {
+            _banner.querySelector('.oja-banner-action')?.addEventListener('click', (e) => {
                 e.preventDefault();
                 options.action.fn();
-                if (options.action.autoDismiss !== false) {
-                    notify.dismissBanner();
-                }
+                if (options.action.autoDismiss !== false) notify.dismissBanner();
             });
         }
 
-        const dismissBtn = _banner.querySelector('.oja-banner-dismiss');
-        if (dismissBtn) {
-            dismissBtn.addEventListener('click', () => notify.dismissBanner());
-        }
+        _banner.querySelector('.oja-banner-dismiss')?.addEventListener('click', () => {
+            notify.dismissBanner();
+        });
 
-        if (options.timeout) {
-            setTimeout(() => notify.dismissBanner(), options.timeout);
-        }
+        if (options.timeout) setTimeout(() => notify.dismissBanner(), options.timeout);
 
         document.body.insertBefore(_banner, document.body.firstChild);
 
-        if (options.announce !== false) {
-            _announce(message, meta.live);
-        }
+        if (options.announce !== false) _announce(message, meta.live);
 
         emit('notify:banner', { message, type, id: _banner.id });
         return this;
@@ -209,13 +185,17 @@ export const notify = {
      * Remove the current banner with a fade-out animation.
      */
     dismissBanner() {
-        if (_banner) {
-            _banner.classList.add('oja-banner-leaving');
-            setTimeout(() => {
-                _banner?.remove();
-                _banner = null;
-            }, 200);
-        }
+        if (!_banner) return this;
+
+        // Capture the reference before the timeout so a subsequent banner()
+        // call that sets _banner = null doesn't prevent the element from being
+        // removed if the timeout fires after the new banner has been created.
+        const bannerEl = _banner;
+        _banner = null;
+
+        bannerEl.classList.add('oja-banner-leaving');
+        setTimeout(() => bannerEl.remove(), 200);
+
         return this;
     },
 
@@ -224,28 +204,22 @@ export const notify = {
     /**
      * Set toast position. Takes effect immediately if container exists.
      * 'top-right' | 'top-left' | 'top-center' | 'bottom-right' | 'bottom-left' | 'bottom-center'
-     *
-     * Default: 'top-right'
      */
     setPosition(position) {
         _position = position;
-        if (_container) {
-            _container.className = `oja-toast-container oja-toast-${position}`;
-        }
+        if (_container) _container.className = `oja-toast-container oja-toast-${position}`;
         return this;
     },
 
     // ─── Dismiss ──────────────────────────────────────────────────────────────
 
-    /** Dismiss all visible toasts immediately */
+    /** Dismiss all visible toasts immediately. */
     dismissAll() {
         _container?.querySelectorAll('.oja-toast').forEach(_dismiss);
         return this;
     },
 
-    /**
-     * Get the current toast count
-     */
+    /** Get the current toast count. */
     count() {
         return _container?.querySelectorAll('.oja-toast:not(.oja-toast-leaving)').length || 0;
     },
@@ -263,12 +237,11 @@ export const notify = {
 
     /**
      * Manually announce a message to screen readers.
-     * Use for custom accessibility needs.
      */
     announce(message, assertive = false) {
         _announce(message, assertive ? 'assertive' : 'polite');
         return this;
-    }
+    },
 };
 
 // ─── Core ─────────────────────────────────────────────────────────────────────
@@ -306,29 +279,21 @@ function _show(type, message, options = {}) {
     `;
 
     if (opts.action) {
-        const actionBtn = toast.querySelector('.oja-toast-action');
-        actionBtn?.addEventListener('click', () => {
+        toast.querySelector('.oja-toast-action')?.addEventListener('click', () => {
             opts.action.fn();
-            if (opts.action.autoDismiss !== false) {
-                _dismiss(toast);
-            }
+            if (opts.action.autoDismiss !== false) _dismiss(toast);
         });
     }
 
     if (opts.dismissible) {
-        const closeBtn = toast.querySelector('.oja-toast-close');
-        closeBtn?.addEventListener('click', () => _dismiss(toast));
+        toast.querySelector('.oja-toast-close')?.addEventListener('click', () => _dismiss(toast));
     }
 
     _container.appendChild(toast);
 
-    requestAnimationFrame(() => {
-        toast.classList.add('oja-toast-visible');
-    });
+    requestAnimationFrame(() => toast.classList.add('oja-toast-visible'));
 
-    if (opts.announce) {
-        _announce(message, meta.live);
-    }
+    if (opts.announce) _announce(message, meta.live);
 
     if (opts.duration > 0) {
         toast._duration  = opts.duration;
@@ -344,8 +309,8 @@ async function _showResponder(responder, options = {}) {
     _ensureContainer();
     _ensureAnnouncer();
 
-    const opts  = { ...DEFAULTS, ...options };
-    const id    = `oja-toast-${++_idCounter}`;
+    const opts = { ...DEFAULTS, ...options };
+    const id   = `oja-toast-${++_idCounter}`;
 
     const toast = document.createElement('div');
     toast.id        = id;
@@ -377,9 +342,7 @@ async function _showResponder(responder, options = {}) {
 
     await responder.render(body);
 
-    requestAnimationFrame(() => {
-        toast.classList.add('oja-toast-visible');
-    });
+    requestAnimationFrame(() => toast.classList.add('oja-toast-visible'));
 
     if (opts.announce && responder.getText) {
         const text = responder.getText();
@@ -407,18 +370,13 @@ function _dismiss(toast) {
     toast.classList.remove('oja-toast-visible');
 
     setTimeout(() => {
-        if (toast.parentNode) {
-            toast.remove();
-        }
+        if (toast.parentNode) toast.remove();
         emit('notify:dismissed', { id: toast.id });
     }, 300);
 }
 
 function _pauseToast(toast) {
     if (toast._timeout) {
-        // _idleTimeout is a non-standard V8 internal — it returns undefined in
-        // Firefox and Safari, producing NaN delays on resume. Instead we compute
-        // remaining time from the wall-clock elapsed since the timer started.
         const elapsed    = Date.now() - (toast._startedAt || 0);
         toast._remaining = Math.max(0, (toast._duration || 0) - elapsed);
         clearTimeout(toast._timeout);
@@ -428,7 +386,6 @@ function _pauseToast(toast) {
 
 function _resumeToast(toast, defaultDuration) {
     if (toast._remaining) {
-        // Reset _startedAt so a subsequent pause computes correctly from now
         toast._duration  = toast._remaining;
         toast._startedAt = Date.now();
         toast._timeout   = setTimeout(() => _dismiss(toast), toast._remaining);
@@ -442,7 +399,6 @@ function _resumeToast(toast, defaultDuration) {
 
 function _ensureContainer() {
     if (_container && document.body.contains(_container)) return;
-
     _container = document.createElement('div');
     _container.className = `oja-toast-container oja-toast-${_position}`;
     _container.setAttribute('aria-live', 'polite');
@@ -454,22 +410,17 @@ function _ensureContainer() {
 
 function _ensureAnnouncer() {
     if (_announcer && document.body.contains(_announcer)) return;
-
     _announcer = document.getElementById('oja-announcer') || (() => {
         const el = document.createElement('div');
         el.id = 'oja-announcer';
         el.setAttribute('aria-live', 'polite');
         el.setAttribute('aria-atomic', 'true');
         el.setAttribute('role', 'status');
-        el.style.position = 'absolute';
-        el.style.width = '1px';
-        el.style.height = '1px';
-        el.style.padding = '0';
-        el.style.margin = '-1px';
-        el.style.overflow = 'hidden';
-        el.style.clip = 'rect(0, 0, 0, 0)';
-        el.style.whiteSpace = 'nowrap';
-        el.style.border = '0';
+        Object.assign(el.style, {
+            position: 'absolute', width: '1px', height: '1px',
+            padding: '0', margin: '-1px', overflow: 'hidden',
+            clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: '0',
+        });
         document.body.appendChild(el);
         return el;
     })();
@@ -477,18 +428,11 @@ function _ensureAnnouncer() {
 
 function _announce(message, priority = 'polite') {
     if (!_announcer) return;
-
     _announcer.setAttribute('aria-live', priority);
     _announcer.textContent = '';
-
+    setTimeout(() => { _announcer.textContent = message; }, 50);
     setTimeout(() => {
-        _announcer.textContent = message;
-    }, 50);
-
-    setTimeout(() => {
-        if (_announcer.textContent === message) {
-            _announcer.textContent = '';
-        }
+        if (_announcer.textContent === message) _announcer.textContent = '';
     }, 3000);
 }
 
@@ -501,13 +445,11 @@ function _esc(str) {
         .replace(/'/g, '&#039;');
 }
 
-// ─── Auto-initialize announcer on DOM ready ──────────────────────────────────
+// ─── Auto-initialize announcer on DOM ready ───────────────────────────────────
 
 if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            _ensureAnnouncer();
-        });
+        document.addEventListener('DOMContentLoaded', _ensureAnnouncer);
     } else {
         _ensureAnnouncer();
     }

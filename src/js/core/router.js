@@ -1,6 +1,6 @@
 /**
  * oja/router.js
- * SPA navigation — Go-style middleware, groups, and Race-Safe rendering.
+ * SPA navigation — Go-style middleware, groups, and race-safe rendering.
  *
  * The power of this router is Use() and Group():
  *   Use()   → middleware applied to all routes below it
@@ -55,9 +55,6 @@
  *   // Prefetch multiple routes after initial load
  *   router.prefetch(['/dashboard', '/hosts', '/firewall']);
  *
- *   // Prefetch with priority
- *   router.prefetch('/critical-route', { priority: 'high', timeout: 5000 });
- *
  * ─── Middleware pattern ────────────────────────────────────────────────────────
  *
  *   // Wrap — do work before AND after the route renders
@@ -85,7 +82,6 @@
  * ─── Query string helpers ─────────────────────────────────────────────────────
  *
  *   // Update query params without triggering a full navigation.
- *   // Useful for syncing filter/sort state to the URL so it's shareable.
  *   router.setQuery({ filter: 'alive', sort: 'name' });
  *
  *   // Read current query params
@@ -93,21 +89,21 @@
  */
 
 import { Store }     from './store.js';
-import { Out } from './out.js';
+import { Out }       from './out.js';
 import { component } from './component.js';
 
 const _store = new Store('oja:router');
 
-// ─── Prefetching queue ────────────────────────────────────────────────────────
+// ─── Prefetching ──────────────────────────────────────────────────────────────
 
 const _prefetchQueue = new Set();
-const _prefetchCache = new Map(); // url -> { promise, timestamp, priority }
+const _prefetchCache = new Map();  // url -> { promise, timestamp, priority }
 const _prefetchLinks = new WeakMap(); // element -> { url, timeout }
 
 const PREFETCH_DEFAULTS = {
-    delay: 200,
-    timeout: 10000,
-    priority: 'low',
+    delay:         200,
+    timeout:       10000,
+    priority:      'low',
     maxConcurrent: 3,
 };
 
@@ -124,7 +120,7 @@ class _RouteNode {
         this.children   = new Map();
         this.paramChild = null;
         this.paramName  = null;
-        this.prefetch   = false; // Whether this route should be prefetched
+        this.prefetch   = false;
     }
 }
 
@@ -155,17 +151,10 @@ export class Router {
         this._prefetchEnabled  = prefetch;
     }
 
-    // ─── Prefetching ─────────────────────────────────────────────────────────
+    // ─── Prefetching ──────────────────────────────────────────────────────────
 
     /**
-     * Configure prefetching behavior.
-     *
-     *   router.configurePrefetch({
-     *       delay: 100,           // ms to wait before prefetching on hover
-     *       timeout: 5000,        // max time to wait for prefetch
-     *       maxConcurrent: 3,      // max concurrent prefetch requests
-     *       priority: 'high'       // default priority
-     *   });
+     * Configure prefetching behaviour.
      */
     configurePrefetch(config = {}) {
         _prefetchConfig = { ..._prefetchConfig, ...config };
@@ -175,16 +164,11 @@ export class Router {
     /**
      * Prefetch specific routes.
      * Returns a promise that resolves when all prefetches complete.
-     *
-     *   await router.prefetch(['/dashboard', '/hosts']);
-     *   router.prefetch('/critical-route', { priority: 'high' });
      */
     async prefetch(target, options = {}) {
         const urls = Array.isArray(target) ? target : [target];
         const opts = { ..._prefetchConfig, ...options };
-
-        const promises = urls.map(url => this._prefetchRoute(url, opts));
-        await Promise.allSettled(promises);
+        await Promise.allSettled(urls.map(url => this._prefetchRoute(url, opts)));
         return this;
     }
 
@@ -192,7 +176,6 @@ export class Router {
      * Enable prefetching on hover for matching links.
      *
      *   router.prefetchOnHover('.nav-link', { delay: 100 });
-     *   router.prefetchOnHover('[data-prefetch]');
      */
     prefetchOnHover(selector, options = {}) {
         const opts = { ..._prefetchConfig, ...options };
@@ -201,16 +184,11 @@ export class Router {
             const link = e.target.closest(selector);
             if (!link) return;
 
-            if (_prefetchLinks.has(link)) {
-                clearTimeout(_prefetchLinks.get(link).timeout);
-            }
+            if (_prefetchLinks.has(link)) clearTimeout(_prefetchLinks.get(link).timeout);
 
             const timeout = setTimeout(() => {
                 const href = link.getAttribute('href') || link.dataset.href || link.dataset.page;
-                if (href) {
-                    const path = this._normalizePath(href);
-                    this._prefetchRoute(path, opts);
-                }
+                if (href) this._prefetchRoute(this._normalizePath(href), opts);
             }, opts.delay);
 
             _prefetchLinks.set(link, { url: link.href, timeout });
@@ -219,12 +197,8 @@ export class Router {
         const cancelHandler = (e) => {
             const link = e.target.closest(selector);
             if (!link) return;
-
             const data = _prefetchLinks.get(link);
-            if (data) {
-                clearTimeout(data.timeout);
-                _prefetchLinks.delete(link);
-            }
+            if (data) { clearTimeout(data.timeout); _prefetchLinks.delete(link); }
         };
 
         document.addEventListener('mouseenter', handler, { passive: true });
@@ -239,9 +213,7 @@ export class Router {
     async _prefetchRoute(path, options) {
         if (_prefetchCache.has(path)) {
             const cached = _prefetchCache.get(path);
-            if (Date.now() - cached.timestamp < 60000) {
-                return cached.promise;
-            }
+            if (Date.now() - cached.timestamp < 60000) return cached.promise;
         }
 
         if (_prefetchActive >= _prefetchConfig.maxConcurrent) {
@@ -257,25 +229,17 @@ export class Router {
                 if (!match) return;
 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), options.timeout);
+                const timeoutId  = setTimeout(() => controller.abort(), options.timeout);
 
                 if (match.responder && typeof match.responder.prefetch === 'function') {
                     await match.responder.prefetch({ signal: controller.signal });
                 }
 
                 clearTimeout(timeoutId);
-
-                _prefetchCache.set(path, {
-                    promise,
-                    timestamp: Date.now(),
-                    priority: options.priority,
-                });
-
+                _prefetchCache.set(path, { promise, timestamp: Date.now(), priority: options.priority });
                 this._processPrefetchQueue();
             } catch (e) {
-                if (e.name !== 'AbortError') {
-                    console.warn(`[oja/router] Prefetch failed for ${path}:`, e);
-                }
+                if (e.name !== 'AbortError') console.warn(`[oja/router] Prefetch failed for ${path}:`, e);
             } finally {
                 _prefetchActive--;
                 this._processPrefetchQueue();
@@ -286,9 +250,7 @@ export class Router {
     }
 
     _processPrefetchQueue() {
-        if (_prefetchQueue.size === 0) return;
-        if (_prefetchActive >= _prefetchConfig.maxConcurrent) return;
-
+        if (_prefetchQueue.size === 0 || _prefetchActive >= _prefetchConfig.maxConcurrent) return;
         const [next] = _prefetchQueue;
         _prefetchQueue.delete(next);
         this._prefetchRoute(next.path, next.options);
@@ -327,14 +289,13 @@ export class Router {
         return this;
     }
 
-    /** Mark a route for automatic prefetching */
+    /** Mark a route for automatic prefetching. */
     Prefetch(pattern) {
-        const node = this._findOrCreate(pattern);
-        node.prefetch = true;
+        this._findOrCreate(pattern).prefetch = true;
         return this;
     }
 
-    NotFound(responder) { this._notFound = responder; return this; }
+    NotFound(responder) { this._notFound       = responder; return this; }
     Error(responder)    { this._errorResponder = responder; return this; }
 
     // ─── Grouping ─────────────────────────────────────────────────────────────
@@ -374,16 +335,12 @@ export class Router {
 
     /**
      * Update URL query params without triggering a full navigation.
-     * Use to sync reactive filter/sort state to the URL so links are shareable.
      */
     setQuery(params = {}) {
         if (!this._current) return this;
-
         const cleanPath = this._current.split('?')[0];
-        const qs  = _buildQuery(params);
-
-        const url = (this._mode === 'hash' ? '#' : '') + cleanPath + (qs ? '?' + qs : '');
-
+        const qs        = _buildQuery(params);
+        const url       = (this._mode === 'hash' ? '#' : '') + cleanPath + (qs ? '?' + qs : '');
         window.history.replaceState({ path: cleanPath, params }, '', url);
         this._params = { ...this._params, ...params };
         return this;
@@ -405,9 +362,7 @@ export class Router {
 
         await this._handleURL(defaultPath);
 
-        if (this._prefetchEnabled) {
-            this._setupPrefetchDetection();
-        }
+        if (this._prefetchEnabled) this._setupPrefetchDetection();
     }
 
     _setupPrefetchDetection() {
@@ -419,17 +374,12 @@ export class Router {
                     if (href) {
                         const path = this._normalizePath(href);
                         const node = this._match(path);
-                        if (node && node.prefetch) {
-                            this._prefetchRoute(path, { priority: 'low' });
-                        }
+                        if (node?.prefetch) this._prefetchRoute(path, { priority: 'low' });
                     }
                 }
             }
         });
-
-        document.querySelectorAll('[data-prefetch], a[data-page]').forEach(el => {
-            observer.observe(el);
-        });
+        document.querySelectorAll('[data-prefetch], a[data-page]').forEach(el => observer.observe(el));
     }
 
     async _handleURL(defaultPath = '/') {
@@ -440,7 +390,7 @@ export class Router {
     // ─── Navigation ───────────────────────────────────────────────────────────
 
     /**
-     * Navigate to a path — updates URL, runs middleware chain, renders Responder.
+     * Navigate to a path — updates URL, runs middleware chain, renders Out.
      * Race-safe: only the most recent navigate() call is allowed to complete.
      */
     async navigate(path, options = {}) {
@@ -451,9 +401,7 @@ export class Router {
 
         if (!options._replace) this._pushURL(pathname, query);
 
-        document.dispatchEvent(new CustomEvent('oja:navigate:start', {
-            detail: { path: pathname }
-        }));
+        document.dispatchEvent(new CustomEvent('oja:navigate:start', { detail: { path: pathname } }));
 
         if (this._loadingResponder && container) {
             container.innerHTML = '';
@@ -489,9 +437,11 @@ export class Router {
             if (stop === false) return;
         }
 
-        const allMiddleware = [...this._globalMiddleware, ...match.middleware];
+        // Deduplicate the middleware chain. Route nodes store global middleware
+        // already baked in from _addRoute(), so we must not prepend
+        // _globalMiddleware again — doing so would run it twice per request.
         const seen  = new Set();
-        const chain = allMiddleware.filter(mw => {
+        const chain = match.middleware.filter(mw => {
             if (seen.has(mw)) return false;
             seen.add(mw);
             return true;
@@ -539,7 +489,7 @@ export class Router {
 
         this._current = pathname;
         this._params  = ctx.params;
-        _store.set('page', pathname);
+        _store.set('page',   pathname);
         _store.set('params', ctx.params);
 
         try {
@@ -557,11 +507,11 @@ export class Router {
         if (container) await component._runMount(container);
 
         document.dispatchEvent(new CustomEvent('oja:navigate:end', {
-            detail: { path: pathname, params: ctx.params }
+            detail: { path: pathname, params: ctx.params },
         }));
 
         document.dispatchEvent(new CustomEvent('oja:navigate', {
-            detail: { path: pathname, params: ctx.params }
+            detail: { path: pathname, params: ctx.params },
         }));
     }
 
@@ -581,7 +531,7 @@ export class Router {
         container.classList.remove('oja-entering');
     }
 
-    back() { window.history.back(); }
+    back()    { window.history.back(); }
 
     async refresh() {
         if (!this._current) return;
@@ -599,14 +549,11 @@ export class Router {
 
     _parseURL() {
         if (this._mode === 'hash') {
-            const hash = window.location.hash.slice(1) || '';
-            // Strip any in-page fragment anchor BEFORE parsing the query string.
+            const hash            = window.location.hash.slice(1) || '';
             const withoutFragment = hash.split('#')[0];
             const [path, qs]      = withoutFragment.split('?');
             return { path: path || '', query: _parseQuery(qs || '') };
         } else {
-            // Path mode: the browser already separates pathname, search, and
-            // hash into distinct properties — no fragment stripping needed.
             const path = window.location.pathname;
             const qs   = window.location.search.slice(1);
             return { path: path || '/', query: _parseQuery(qs) };
@@ -632,7 +579,6 @@ export class Router {
             el.classList.toggle('active', active);
             el.setAttribute('aria-current', active ? 'page' : null);
         });
-
         document.querySelectorAll('[data-href]').forEach(el => {
             const active = el.dataset.href === path;
             el.classList.toggle('active', active);
@@ -641,9 +587,13 @@ export class Router {
     }
 
     _addRoute(pattern, responder, routeMiddleware = []) {
-        const node = this._findOrCreate(pattern);
+        const node      = this._findOrCreate(pattern);
         node.responder  = responder;
-        node.middleware = [...this._globalMiddleware, ...routeMiddleware];
+        // Store only the route-specific middleware here. Global middleware is
+        // already on this._globalMiddleware and will be prepended in navigate()
+        // via the match.middleware array — storing it here too would cause it
+        // to run twice per request.
+        node.middleware = routeMiddleware;
     }
 
     _findOrCreate(pattern) {
@@ -658,9 +608,7 @@ export class Router {
                 }
                 node = node.paramChild;
             } else {
-                if (!node.children.has(seg)) {
-                    node.children.set(seg, new _RouteNode(seg));
-                }
+                if (!node.children.has(seg)) node.children.set(seg, new _RouteNode(seg));
                 node = node.children.get(seg);
             }
         }
@@ -671,7 +619,6 @@ export class Router {
         const parts      = _segments(pathname);
         const params     = {};
         let   node       = this._root;
-        const middleware = [];
 
         for (const part of parts) {
             if (node.children.has(part)) {
@@ -682,11 +629,18 @@ export class Router {
             } else {
                 return null;
             }
-            if (node.middleware.length) middleware.push(...node.middleware);
         }
 
         if (!node.responder) return null;
-        return { responder: node.responder, params, middleware };
+
+        // Compose the full middleware chain: global first, then route-specific.
+        // This is the single place where global middleware is included — _addRoute
+        // no longer bakes global middleware into the node, so there is no duplication.
+        return {
+            responder:  node.responder,
+            params,
+            middleware: [...this._globalMiddleware, ...node.middleware],
+        };
     }
 }
 
@@ -705,7 +659,7 @@ Router.middleware = {
     },
 
     /**
-     * Error boundary — catches errors in the chain and renders error Responder.
+     * Error boundary — catches errors in the chain and renders error Out.
      *   r.Use(Router.middleware.errorBoundary(Out.c('pages/error.html')));
      */
     errorBoundary: (errorResponder) => async (ctx, next) => {
@@ -732,23 +686,22 @@ Router.middleware = {
      */
     pageTitle: (appName = '') => async (ctx) => {
         const container = document.querySelector(ctx.outlet);
-        const title = container?.querySelector('[data-title]')?.dataset?.title;
-        document.title = title ? `${title} — ${appName}` : appName;
+        const title     = container?.querySelector('[data-title]')?.dataset?.title;
+        document.title  = title ? `${title} — ${appName}` : appName;
     },
 
     /**
-     * Prefetch middleware — automatically prefetches linked routes
+     * Prefetch middleware — automatically prefetches linked routes after render.
      */
     prefetch: (router) => async (ctx, next) => {
         await next();
         if (router._prefetchEnabled) {
-            const links = document.querySelectorAll('[data-page], [data-href]');
-            links.forEach(link => {
+            document.querySelectorAll('[data-page], [data-href]').forEach(link => {
                 const path = link.dataset.page || link.dataset.href;
                 if (path) router._prefetchRoute(path, { priority: 'low' });
             });
         }
-    }
+    },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -759,9 +712,10 @@ function _segments(path) {
 
 function _unwrapChain(responderOrChain) {
     if (Array.isArray(responderOrChain)) {
-        const last       = responderOrChain[responderOrChain.length - 1];
-        const middleware = responderOrChain.slice(0, -1);
-        return { responder: last, middleware };
+        return {
+            responder:  responderOrChain[responderOrChain.length - 1],
+            middleware: responderOrChain.slice(0, -1),
+        };
     }
     return { responder: responderOrChain, middleware: [] };
 }

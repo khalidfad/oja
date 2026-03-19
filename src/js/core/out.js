@@ -1,3 +1,7 @@
+// src/js/core/out.js
+// ====== DETAILED ======
+// Lines: 680
+// Size: 23764 bytes
 /**
  * oja/out.js
  * The universal display primitive — describes WHAT to show without rendering
@@ -55,9 +59,9 @@
  *   out.getText()                     — plain text representation (accessibility)
  */
 
-import { render as templateRender, fill } from './template.js';
-import { execScripts }                     from './_exec.js';
-import { emit }                            from './events.js';
+import { render as templateRender, fill, each } from './template.js';
+import { execScripts }                           from './_exec.js';
+import { emit }                                  from './events.js';
 
 // ─── Cache for component HTML ─────────────────────────────────────────────────
 //
@@ -356,17 +360,24 @@ class _ComponentOut extends _Out {
             fill(container, mergedData);
 
             if (Object.keys(this._lists).length > 0) {
-                const { each } = await import('./template.js');
                 for (const [name, items] of Object.entries(this._lists)) {
                     each(container, name, items);
                 }
             }
 
+            // Dynamic import breaks circular dependency: out.js → component.js → out.js.
+            // The import is deferred to render time so the module graph resolves at load
+            // time without a cycle, while still giving component.js its _activeElement
+            // tracking so onMount/onUnmount hooks registered inside component scripts
+            // are scoped to the right container.
             const { component } = await import('./component.js');
             const oldActive = component._activeElement;
             component._activeElement = container;
-            execScripts(container, this._payload);
-            component._activeElement = oldActive;
+            try {
+                execScripts(container, this._payload);
+            } finally {
+                component._activeElement = oldActive;
+            }
 
             const ms = performance.now() - start;
             emit('out:component-rendered', {

@@ -283,8 +283,6 @@ class Animation {
     play() {
         if (this.completed) return this;
         const delay = this.options.delay || 0;
-        this.startTime = performance.now() - this.pausedTime + delay;
-        this.startTime = performance.now() - this.pausedTime;
         this.paused = false;
         if (delay > 0 && this.pausedTime === 0) {
             // First play with a delay — schedule the actual start
@@ -295,6 +293,7 @@ class Animation {
                 }
             }, delay);
         } else {
+            this.startTime = performance.now() - this.pausedTime;
             this._tick();
         }
         return this;

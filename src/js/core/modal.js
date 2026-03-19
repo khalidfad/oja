@@ -24,9 +24,7 @@
  *   modal.push('confirmModal', { message: 'Delete backend?', onConfirm: fn });
  *
  *   // Escape or back → pop one level at a time
- *   modal.pop();   // closes confirmModal, backendDrawer still open
- *   modal.pop();   // closes backendDrawer, routeDrawer still open
- *   modal.pop();   // closes routeDrawer
+ *   modal.pop();
  *
  * ─── Lifecycle hooks ──────────────────────────────────────────────────────────
  *
@@ -41,7 +39,7 @@
  *
  * ─── HTML convention ──────────────────────────────────────────────────────────
  *
- *   <!-- Oja looks for [data-modal-body] inside the modal to render Responders -->
+ *   <!-- Oja looks for [data-modal-body] inside the modal to render Outs -->
  *   <div class="modal-overlay" id="detailModal">
  *       <div class="modal">
  *           <button data-action="modal-close">&times;</button>
@@ -59,9 +57,9 @@
  */
 
 import { emit, listen, on } from './events.js';
-import { Out } from './out.js';
+import { Out }              from './out.js';
 
-// ─── Focus trap management ────────────────────────────────────────────────────
+// ─── Focus trap ───────────────────────────────────────────────────────────────
 
 const FOCUSABLE_SELECTORS = [
     'button:not([disabled])',
@@ -71,38 +69,31 @@ const FOCUSABLE_SELECTORS = [
     'textarea:not([disabled])',
     '[tabindex]:not([tabindex="-1"]):not([disabled])',
     'details:not([disabled])',
-    '[contenteditable="true"]'
+    '[contenteditable="true"]',
 ].join(',');
 
-let _previousFocus = null;
-let _focusTrapActive = false;
+let _previousFocus    = null;
+let _focusTrapActive  = false;
 let _focusTrapElement = null;
 
 function _setupFocusTrap(modalElement) {
     if (_focusTrapActive) return;
 
-    _previousFocus = document.activeElement;
+    _previousFocus    = document.activeElement;
     _focusTrapElement = modalElement;
-    _focusTrapActive = true;
+    _focusTrapActive  = true;
 
     modalElement.addEventListener('keydown', _handleTrapKeydown);
-
     _focusFirstElement(modalElement);
 }
 
 function _releaseFocusTrap() {
     if (!_focusTrapActive) return;
 
-    // Remove the invisible fallback button injected when no focusable elements
-    // were present — it must not persist in the DOM after close.
     _focusTrapElement?.querySelectorAll('[data-oja-focus-fallback]').forEach(el => el.remove());
-
     _focusTrapElement?.removeEventListener('keydown', _handleTrapKeydown);
     _focusTrapActive = false;
 
-    // Restore focus to the previously focused element, but only if it is still
-    // in the document, visible, and not disabled — all three conditions must
-    // hold or focusing it would be a no-op or throw in strict browsers.
     if (
         _previousFocus &&
         document.contains(_previousFocus) &&
@@ -112,7 +103,8 @@ function _releaseFocusTrap() {
     ) {
         _previousFocus.focus();
     }
-    _previousFocus = null;
+
+    _previousFocus    = null;
     _focusTrapElement = null;
 }
 
@@ -121,26 +113,17 @@ function _handleTrapKeydown(e) {
 
     const focusable = Array.from(
         _focusTrapElement.querySelectorAll(FOCUSABLE_SELECTORS)
-    ).filter(el => el.offsetParent !== null); // Only visible elements
+    ).filter(el => el.offsetParent !== null);
 
-    if (focusable.length === 0) {
-        e.preventDefault();
-        return;
-    }
+    if (focusable.length === 0) { e.preventDefault(); return; }
 
-    const firstFocusable = focusable[0];
-    const lastFocusable = focusable[focusable.length - 1];
+    const first = focusable[0];
+    const last  = focusable[focusable.length - 1];
 
     if (e.shiftKey) {
-        if (document.activeElement === firstFocusable) {
-            e.preventDefault();
-            lastFocusable.focus();
-        }
+        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
     } else {
-        if (document.activeElement === lastFocusable) {
-            e.preventDefault();
-            firstFocusable.focus();
-        }
+        if (document.activeElement === last)  { e.preventDefault(); first.focus(); }
     }
 }
 
@@ -165,52 +148,30 @@ function _getAllFocusable(container) {
 
 const _stack = [];
 const _hooks = new Map();
-let _backdrop = null;
+let   _backdrop = null;
 
 // ─── Accessibility helpers ────────────────────────────────────────────────────
 
 function _setAriaHidden(element, hidden) {
     if (!element) return;
     element.setAttribute('aria-hidden', hidden ? 'true' : 'false');
-
     if (element.classList.contains('drawer') || element.classList.contains('modal-overlay')) {
-        if (hidden) {
-            element.setAttribute('inert', '');
-        } else {
-            element.removeAttribute('inert');
-        }
+        if (hidden) element.setAttribute('inert', '');
+        else        element.removeAttribute('inert');
     }
 }
 
-function _announce(message, assertive = false) {
-    const announcer = document.getElementById('oja-announcer') || (() => {
-        const el = document.createElement('div');
-        el.id = 'oja-announcer';
-        el.setAttribute('aria-live', 'polite');
-        el.setAttribute('aria-atomic', 'true');
-        el.style.position = 'absolute';
-        el.style.width = '1px';
-        el.style.height = '1px';
-        el.style.padding = '0';
-        el.style.margin = '-1px';
-        el.style.overflow = 'hidden';
-        el.style.clip = 'rect(0, 0, 0, 0)';
-        el.style.whiteSpace = 'nowrap';
-        el.style.border = '0';
-        document.body.appendChild(el);
-        return el;
-    })();
-
-    if (assertive) {
-        announcer.setAttribute('aria-live', 'assertive');
-    } else {
-        announcer.setAttribute('aria-live', 'polite');
-    }
-
+function _announce(message) {
+    const announcer = document.getElementById('oja-announcer');
+    if (!announcer) return;
     announcer.textContent = message;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
+
+// Tracks any in-flight confirm promise resolver keyed by modal ID.
+// A second call before the first resolves dismisses the previous one gracefully.
+const _pendingConfirms = new Map();
 
 export const modal = {
 
@@ -231,24 +192,17 @@ export const modal = {
         el.classList.add('active');
 
         const focusable = _getAllFocusable(el);
-        const description = data['aria-description'] || data.description || el.getAttribute('aria-description') || '';
 
         if (focusable.length === 0) {
-            console.warn(`[oja/modal] #${id} has no focusable elements - adding fallback`);
+            console.warn(`[oja/modal] #${id} has no focusable elements — adding fallback`);
             const fallback = document.createElement('button');
             fallback.setAttribute('aria-label', 'Close modal');
-            // Mark with a data attribute so _releaseFocusTrap can find and
-            // remove it on close — without this the button leaks into the DOM
-            // permanently, accumulating with every open/close cycle.
             fallback.dataset.ojaFocusFallback = 'true';
-            fallback.style.position = 'absolute';
-            fallback.style.width = '1px';
-            fallback.style.height = '1px';
-            fallback.style.padding = '0';
-            fallback.style.margin = '-1px';
-            fallback.style.overflow = 'hidden';
-            fallback.style.clip = 'rect(0, 0, 0, 0)';
-            fallback.style.border = '0';
+            Object.assign(fallback.style, {
+                position: 'absolute', width: '1px', height: '1px',
+                padding: '0', margin: '-1px', overflow: 'hidden',
+                clip: 'rect(0,0,0,0)', border: '0',
+            });
             fallback.addEventListener('click', () => modal.close());
             el.appendChild(fallback);
         }
@@ -263,37 +217,28 @@ export const modal = {
 
         if (data.body && Out.is(data.body)) {
             const bodyEl = el.querySelector('[data-modal-body]');
-            if (bodyEl) {
-                data.body.render(bodyEl, data);
-            }
+            if (bodyEl) data.body.render(bodyEl, data);
         }
 
-        if (Object.keys(data).length > 0) {
-            _fillModal(el, data);
-        }
+        if (Object.keys(data).length > 0) _fillModal(el, data);
 
         _runHooks(id, 'open', data);
         emit('modal:open', { id, data });
-
-        _announce(`Opened ${el.getAttribute('aria-label') || id}${description ? ': ' + description : ''}`);
+        _announce(`Opened ${el.getAttribute('aria-label') || id}`);
 
         return this;
     },
 
-    /** Alias for open() — more semantic for drawer stacks */
-    push(id, data = {}) {
-        return this.open(id, data);
-    },
+    /** Alias for open() — semantic for drawer stacks. */
+    push(id, data = {}) { return this.open(id, data); },
 
     /**
      * Close the top-most modal/drawer on the stack.
-     * Alias: modal.pop()
      */
     close() {
         if (_stack.length === 0) return;
 
         const { id, element } = _stack.pop();
-
         element.classList.remove('active');
         _setAriaHidden(element, true);
 
@@ -309,16 +254,13 @@ export const modal = {
 
         _runHooks(id, 'close');
         emit('modal:close', { id });
-
         _announce(`Closed ${element.getAttribute('aria-label') || id}`);
 
         return this;
     },
 
-    /** Alias for close() */
-    pop() {
-        return this.close();
-    },
+    /** Alias for close(). */
+    pop() { return this.close(); },
 
     /**
      * Close a specific modal by ID, regardless of stack position.
@@ -327,16 +269,11 @@ export const modal = {
     closeById(id) {
         const idx = _stack.findIndex(entry => entry.id === id);
         if (idx === -1) return;
-
-        while (_stack.length > idx) {
-            this.close();
-        }
+        while (_stack.length > idx) this.close();
         return this;
     },
 
-    /**
-     * Close everything.
-     */
+    /** Close everything. */
     closeAll() {
         while (_stack.length > 0) this.close();
         return this;
@@ -344,31 +281,15 @@ export const modal = {
 
     // ─── State ────────────────────────────────────────────────────────────────
 
-    /** ID of the top-most open modal, or null */
-    current() {
-        return _stack.length > 0 ? _stack[_stack.length - 1].id : null;
-    },
-
-    /** Full stack as array of { id, data } */
-    stack() {
-        return _stack.map(({ id, data }) => ({ id, data }));
-    },
-
-    /** Is a specific modal currently open? */
-    isOpen(id) {
-        return _stack.some(entry => entry.id === id);
-    },
-
-    /** How deep is the stack? */
-    depth() {
-        return _stack.length;
-    },
+    current() { return _stack.length > 0 ? _stack[_stack.length - 1].id : null; },
+    stack()   { return _stack.map(({ id, data }) => ({ id, data })); },
+    isOpen(id){ return _stack.some(entry => entry.id === id); },
+    depth()   { return _stack.length; },
 
     // ─── Lifecycle hooks ──────────────────────────────────────────────────────
 
     /**
      * Register a handler called when a modal opens.
-     * Handler receives the data passed to open().
      * Returns an unsubscribe function.
      *
      *   modal.onOpen('routeDrawer', (data) => renderRoute(data));
@@ -396,7 +317,6 @@ export const modal = {
     /**
      * Register an element as the backdrop.
      * Clicking it closes the top-most modal.
-     * Oja auto-detects #drawerBackdrop if this is not called.
      */
     setBackdrop(idOrElement) {
         _backdrop = typeof idOrElement === 'string'
@@ -424,20 +344,30 @@ export const modal = {
      *   <button data-confirm-cancel>Cancel</button>
      */
     confirm(message, options = {}) {
+        const id = options.modalId || 'confirmModal';
+
+        // If a confirm for this modal is already in flight, resolve it false
+        // before opening a new one — prevents stacked click listeners on the
+        // same ok/cancel buttons.
+        const pending = _pendingConfirms.get(id);
+        if (pending) {
+            _pendingConfirms.delete(id);
+            pending(false);
+        }
+
         return new Promise(resolve => {
-            const id = options.modalId || 'confirmModal';
+            _pendingConfirms.set(id, resolve);
 
-            const ariaDescription = options['aria-description'] ||
-                'This dialog requires confirmation. Use Tab to navigate between buttons.';
+            const done = (result) => {
+                _pendingConfirms.delete(id);
+                modal.closeById(id);
+                resolve(result);
+            };
 
-            modal.open(id, {
-                message,
-                ...options,
-                'aria-description': ariaDescription
-            });
+            modal.open(id, { message, ...options });
 
             const el = document.getElementById(id);
-            if (!el) { resolve(false); return; }
+            if (!el) { done(false); return; }
 
             const msgEl = el.querySelector('[data-modal-field="message"]');
             if (msgEl) {
@@ -449,99 +379,56 @@ export const modal = {
             const ok     = el.querySelector('[data-confirm-ok]');
             const cancel = el.querySelector('[data-confirm-cancel]');
 
-            if (ok) {
-                ok.setAttribute('aria-label', options.okLabel || 'Confirm');
-            }
-            if (cancel) {
-                cancel.setAttribute('aria-label', options.cancelLabel || 'Cancel');
-            }
+            if (ok)     ok.setAttribute('aria-label',     options.okLabel     || 'Confirm');
+            if (cancel) cancel.setAttribute('aria-label', options.cancelLabel || 'Cancel');
 
-            const cleanup = () => modal.closeById(id);
-
-            const onOk = () => { cleanup(); resolve(true); };
-            const onCancel = () => { cleanup(); resolve(false); };
-
-            ok?.addEventListener('click', onOk, { once: true });
-            cancel?.addEventListener('click', onCancel, { once: true });
+            ok?.addEventListener('click',     () => done(true),  { once: true });
+            cancel?.addEventListener('click', () => done(false), { once: true });
 
             const unsub = listen('modal:close', ({ id: closedId }) => {
-                if (closedId === id) { unsub(); resolve(false); }
+                if (closedId === id) { unsub(); done(false); }
             });
         });
     },
 
     // ─── Accessibility utilities ──────────────────────────────────────────────
 
-    /**
-     * Get all focusable elements within a modal.
-     * Useful for custom focus management.
-     */
     getFocusable(id) {
         const el = document.getElementById(id);
-        if (!el) return [];
-        return _getAllFocusable(el);
+        return el ? _getAllFocusable(el) : [];
     },
 
-    /**
-     * Manually set focus to a specific element within a modal.
-     */
     setFocus(id, selector) {
         const el = document.getElementById(id);
         if (!el) return;
         const target = selector ? el.querySelector(selector) : _getAllFocusable(el)[0];
         target?.focus();
-    }
+    },
 };
-
-// Semantic alias
-modal.push = modal.open;
-modal.pop  = modal.close;
 
 // ─── Keyboard and event wiring ────────────────────────────────────────────────
 
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && _stack.length > 0) {
-        e.preventDefault();
+    if (e.key !== 'Escape' || _stack.length === 0) return;
+    e.preventDefault();
 
-        const topModal = _stack[_stack.length - 1];
-        const cancelButton = topModal.element.querySelector('[data-confirm-cancel], [data-action="modal-close"], .close-modal');
+    const topModal     = _stack[_stack.length - 1];
+    const cancelButton = topModal.element.querySelector(
+        '[data-confirm-cancel], [data-action="modal-close"], .close-modal'
+    );
 
-        if (cancelButton) {
-            cancelButton.click();
-        } else {
-            modal.close();
-        }
-    }
+    if (cancelButton) cancelButton.click();
+    else modal.close();
 });
 
 on('[data-action="modal-close"]', 'click', () => modal.close());
-on('.close-modal', 'click', () => modal.close());
-on('.drawer-close', 'click', () => modal.close());
+on('.close-modal',   'click', () => modal.close());
+on('.drawer-close',  'click', () => modal.close());
 
 document.addEventListener('DOMContentLoaded', () => {
     const backdrop = document.getElementById('drawerBackdrop')
         || document.getElementById('modalBackdrop');
-    if (backdrop && !_backdrop) {
-        modal.setBackdrop(backdrop);
-    }
-
-    const announcer = document.getElementById('oja-announcer');
-    if (!announcer) {
-        const el = document.createElement('div');
-        el.id = 'oja-announcer';
-        el.setAttribute('aria-live', 'polite');
-        el.setAttribute('aria-atomic', 'true');
-        el.style.position = 'absolute';
-        el.style.width = '1px';
-        el.style.height = '1px';
-        el.style.padding = '0';
-        el.style.margin = '-1px';
-        el.style.overflow = 'hidden';
-        el.style.clip = 'rect(0, 0, 0, 0)';
-        el.style.whiteSpace = 'nowrap';
-        el.style.border = '0';
-        document.body.appendChild(el);
-    }
+    if (backdrop && !_backdrop) modal.setBackdrop(backdrop);
 });
 
 // ─── Internals ────────────────────────────────────────────────────────────────
@@ -569,9 +456,7 @@ function _hideBackdrop() {
 }
 
 function _ensureHooks(id) {
-    if (!_hooks.has(id)) {
-        _hooks.set(id, { open: new Set(), close: new Set() });
-    }
+    if (!_hooks.has(id)) _hooks.set(id, { open: new Set(), close: new Set() });
 }
 
 function _runHooks(id, type, data) {
@@ -585,37 +470,36 @@ function _runHooks(id, type, data) {
 function _fillModal(el, data) {
     el.querySelectorAll('[data-modal-field]').forEach(field => {
         const key = field.dataset.modalField;
-        if (data[key] !== undefined) {
-            field.textContent = data[key];
-        }
+        if (data[key] !== undefined) field.textContent = data[key];
     });
 
-    if (data['aria-label']) {
-        el.setAttribute('aria-label', data['aria-label']);
-    }
+    if (data['aria-label']) el.setAttribute('aria-label', data['aria-label']);
+
     if (data['aria-description']) {
         // aria-description is not a valid ARIA attribute. The correct pattern
-        // is aria-describedby pointing to an element that contains the text.
-        // We create a visually-hidden description element and reference it.
-        const descId  = `${el.id || 'oja-modal'}-desc`;
-        let descEl = el.querySelector(`#${descId}`);
+        // is aria-describedby pointing to a visually-hidden element that
+        // contains the description text.
+        const descId = `${el.id || 'oja-modal'}-desc`;
+        let descEl   = el.querySelector(`#${descId}`);
         if (!descEl) {
             descEl = document.createElement('p');
             descEl.id = descId;
-            // Visually hidden but readable by screen readers
             descEl.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0';
             el.appendChild(descEl);
         }
         descEl.textContent = data['aria-description'];
         el.setAttribute('aria-describedby', descId);
     }
-    if (data['role']) {
+
+    // Only set role from a fixed allowlist. Accepting arbitrary role values
+    // from caller-supplied data would allow attribute injection if data ever
+    // originates from user input or an API response.
+    const ALLOWED_ROLES = new Set(['dialog', 'alertdialog']);
+    if (data['role'] && ALLOWED_ROLES.has(data['role'])) {
         el.setAttribute('role', data['role']);
     } else if (!el.getAttribute('role')) {
-        el.setAttribute('role', el.classList.contains('drawer') ? 'dialog' : 'dialog');
+        el.setAttribute('role', 'dialog');
     }
 
-    if (!el.hasAttribute('aria-modal')) {
-        el.setAttribute('aria-modal', 'true');
-    }
+    if (!el.hasAttribute('aria-modal')) el.setAttribute('aria-modal', 'true');
 }

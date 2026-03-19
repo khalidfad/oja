@@ -152,8 +152,8 @@ export const debug = {
         return {
             exported  : new Date().toISOString(),
             entries   : [..._timeline],
-            userAgent : navigator.userAgent,
-            url       : window.location.href,
+            userAgent : typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+            url       : typeof window    !== 'undefined' ? window.location.href : 'unknown',
         };
     },
 

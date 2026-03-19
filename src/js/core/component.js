@@ -68,33 +68,31 @@ import { render, each, fill } from './template.js';
 import { execScripts }        from './_exec.js';
 import { emit }               from './events.js';
 
-// ─── HTML cache with TTL ─────────────────────────────────────────────────────
+// ─── HTML cache with TTL ──────────────────────────────────────────────────────
 
 const _cache = new Map(); // url → { html, timestamp, hits, size }
 
 const CACHE_DEFAULTS = {
-    ttl: 60000,        // 60 seconds default
-    maxSize: 20,       // max 20 components in cache
-    maxMemory: 5 * 1024 * 1024, // 5MB max total cache size
+    ttl:       60000,          // 60 seconds
+    maxSize:   20,             // max 20 components in cache
+    maxMemory: 5 * 1024 * 1024, // 5 MB
 };
 
 let _cacheConfig = { ...CACHE_DEFAULTS };
-let _cacheStats = {
-    hits: 0,
-    misses: 0,
-    evictions: 0,
+let _cacheStats  = {
+    hits:       0,
+    misses:     0,
+    evictions:  0,
     totalBytes: 0,
 };
 
 async function _load(url) {
-    // Normalise the URL so 'page' and 'page/' don't create two cache entries
-    // for the same resource. Relative URLs are resolved against the current page.
     const normalised = (() => {
         try { return new URL(url, location.href).href; } catch { return url; }
     })();
     url = normalised;
 
-    const now = Date.now();
+    const now    = Date.now();
     const cached = _cache.get(url);
 
     if (cached && (now - cached.timestamp) < _cacheConfig.ttl) {
@@ -105,8 +103,8 @@ async function _load(url) {
     }
 
     if (cached) {
-        _cache.delete(url);
         _cacheStats.totalBytes -= cached.size || 0;
+        _cache.delete(url);
     }
 
     _cacheStats.misses++;
@@ -131,13 +129,13 @@ async function _load(url) {
 }
 
 function _evictOldest() {
-    let oldestUrl = null;
+    let oldestUrl  = null;
     let oldestTime = Infinity;
 
     for (const [url, entry] of _cache.entries()) {
         if (entry.timestamp < oldestTime) {
             oldestTime = entry.timestamp;
-            oldestUrl = url;
+            oldestUrl  = url;
         }
     }
 
@@ -155,31 +153,24 @@ function _evictOldest() {
 const _renderTimings = new Map(); // url → { count, totalMs, maxMs, minMs }
 
 let _monitoringEnabled = false;
-let _slowThreshold = 100; // ms
+let _slowThreshold     = 100;
 
 function _trackRender(url, ms) {
     if (!_monitoringEnabled) return;
 
     if (!_renderTimings.has(url)) {
-        // Cap at 100 entries to prevent unbounded growth in long-running SPAs.
-        // Evict the oldest entry when the limit is reached.
         if (_renderTimings.size >= 100) {
             const firstKey = _renderTimings.keys().next().value;
             _renderTimings.delete(firstKey);
         }
-        _renderTimings.set(url, {
-            count: 0,
-            totalMs: 0,
-            maxMs: 0,
-            minMs: Infinity,
-        });
+        _renderTimings.set(url, { count: 0, totalMs: 0, maxMs: 0, minMs: Infinity });
     }
 
     const stats = _renderTimings.get(url);
     stats.count++;
     stats.totalMs += ms;
-    stats.maxMs = Math.max(stats.maxMs, ms);
-    stats.minMs = Math.min(stats.minMs, ms);
+    stats.maxMs    = Math.max(stats.maxMs, ms);
+    stats.minMs    = Math.min(stats.minMs, ms);
 
     if (ms > _slowThreshold) {
         emit('component:slow-render', { url, ms, threshold: _slowThreshold });
@@ -189,7 +180,7 @@ function _trackRender(url, ms) {
 // ─── Lifecycle registry ───────────────────────────────────────────────────────
 
 const _scopes = new WeakMap(); // Element → { mount: [], unmount: [], intervals: [], timeouts: [] }
-export let _activeElement = null; // Exported for responder.js to set scope
+export let _activeElement = null;
 
 function _getScope(el) {
     if (!el) return null;
@@ -231,10 +222,10 @@ function _flash(el) {
 
 export const component = {
 
-    // ─── Cache configuration ─────────────────────────────────────────────────
+    // ─── Cache configuration ──────────────────────────────────────────────────
 
     /**
-     * Configure the component cache behavior.
+     * Configure the component cache behaviour.
      *
      * @param {Object} config
      *   ttl       : number  — time to live in ms (default: 60000)
@@ -251,16 +242,12 @@ export const component = {
      * Returns { hits, misses, evictions, totalBytes, size }
      */
     cacheStats() {
-        return {
-            ..._cacheStats,
-            size: _cache.size,
-            config: { ..._cacheConfig },
-        };
+        return { ..._cacheStats, size: _cache.size, config: { ..._cacheConfig } };
     },
 
     /**
      * Clear the component HTML cache.
-     * Useful during development or after a deploy.
+     * Pass a URL to clear one entry, or no argument to clear everything.
      */
     clearCache(url) {
         if (url) {
@@ -272,7 +259,7 @@ export const component = {
         } else {
             _cache.clear();
             _cacheStats.totalBytes = 0;
-            _cacheStats.evictions = 0;
+            _cacheStats.evictions  = 0;
         }
         return this;
     },
@@ -288,7 +275,6 @@ export const component = {
 
     /**
      * Pre-fetch multiple components in parallel.
-     * Useful for prefetching an entire section of the app.
      */
     async prefetchAll(urls) {
         await Promise.all(urls.map(url => _load(url).catch(e => {
@@ -301,13 +287,13 @@ export const component = {
 
     /**
      * Enable render performance monitoring.
-     * Emits 'component:slow-render' events when renders exceed threshold.
+     * Emits 'component:slow-render' when renders exceed the threshold.
      *
-     * @param {number} thresholdMs - Slow render threshold in ms (default: 100)
+     * @param {number} thresholdMs — slow render threshold in ms (default: 100)
      */
     enableMonitoring(thresholdMs = 100) {
         _monitoringEnabled = true;
-        _slowThreshold = thresholdMs;
+        _slowThreshold     = thresholdMs;
         return this;
     },
 
@@ -323,10 +309,7 @@ export const component = {
     renderStats() {
         const stats = {};
         for (const [url, data] of _renderTimings.entries()) {
-            stats[url] = {
-                ...data,
-                avgMs: Math.round(data.totalMs / data.count),
-            };
+            stats[url] = { ...data, avgMs: Math.round(data.totalMs / data.count) };
         }
         return stats;
     },
@@ -343,7 +326,7 @@ export const component = {
      * @param {Object}         lists   — { listName: [items] } for data-each loops
      */
     async mount(target, url, data = {}, lists = {}) {
-        const start = performance.now();
+        const start     = performance.now();
         const container = _resolve(target);
         if (!container) return;
 
@@ -394,9 +377,12 @@ export const component = {
     /**
      * Append a new item to a container with an enter animation.
      * Use for adding a single row/card to an existing list.
+     *
+     * Components with multiple root elements are fully supported — all roots
+     * are appended and animated, and scripts in every root are executed.
      */
     async add(target, url, data = {}) {
-        const start = performance.now();
+        const start     = performance.now();
         const container = _resolve(target);
         if (!container) return;
 
@@ -405,17 +391,40 @@ export const component = {
         wrapper.innerHTML = render(html, data);
         fill(wrapper, data);
 
+        // Collect all root elements before any DOM manipulation so the list
+        // is stable regardless of what execScripts does to the subtree.
+        const roots = Array.from(wrapper.children);
+
+        // Scripts are executed after the elements are in the live document
+        // so that document.querySelector() calls inside those scripts can find
+        // sibling elements, data attributes set by the parent page, etc.
+        // We append first, then exec — the opposite order from the original,
+        // which ran scripts while elements were still in the detached wrapper.
         const prev = _activeElement;
-        _activeElement = wrapper;
+        _activeElement = container;
+
         try {
-            execScripts(wrapper, url);
+            if (roots.length === 1) {
+                // Single-root fast path — avoids the DocumentFragment overhead
+                container.appendChild(roots[0]);
+                execScripts(roots[0], url);
+                await _enter(roots[0]);
+            } else {
+                // Multi-root: append all children, exec scripts in each, animate each.
+                // Using a DocumentFragment keeps reflows to one batch append.
+                const fragment = document.createDocumentFragment();
+                roots.forEach(el => fragment.appendChild(el));
+                container.appendChild(fragment);
+
+                for (const el of roots) {
+                    execScripts(el, url);
+                }
+
+                await Promise.all(roots.map(el => _enter(el)));
+            }
         } finally {
             _activeElement = prev;
         }
-
-        const el = wrapper.firstElementChild || wrapper;
-        container.appendChild(el);
-        await _enter(el);
 
         const ms = performance.now() - start;
         emit('component:added', { url, ms });
@@ -424,9 +433,10 @@ export const component = {
         // Without this, dynamically added components (e.g. a new table row
         // containing a datepicker) would never have their widgets initialised
         // because no navigation event fired.
-        emit('oja:component:added', { el });
+        const addedEl = roots.length === 1 ? roots[0] : container;
+        emit('oja:component:added', { el: addedEl });
 
-        return el;
+        return roots.length === 1 ? roots[0] : roots;
     },
 
     /**
@@ -449,7 +459,7 @@ export const component = {
      */
     async update(target, data = {}) {
         const start = performance.now();
-        const el = _resolve(target);
+        const el    = _resolve(target);
         if (!el) return;
 
         fill(el, data);
@@ -495,16 +505,14 @@ export const component = {
 
     /**
      * Register a repeating interval that is automatically cleared when the
-     * router navigates away. Replaces the common pattern of:
-     *   const id = setInterval(fn, ms);
-     *   document.addEventListener('oja:navigate', () => clearInterval(id), { once: true });
+     * router navigates away.
      *
      *   component.interval(refresh, 3000);
      *
      * @returns {number} The interval id — can be used to clear early if needed.
      */
     interval(fn, ms) {
-        const id = setInterval(fn, ms);
+        const id    = setInterval(fn, ms);
         const scope = _getScope(_activeElement);
         if (scope) scope.intervals.push(id);
         return id;
@@ -519,7 +527,7 @@ export const component = {
      * @returns {number} The timeout id — can be used to clear early if needed.
      */
     timeout(fn, ms) {
-        const id = setTimeout(fn, ms);
+        const id    = setTimeout(fn, ms);
         const scope = _getScope(_activeElement);
         if (scope) scope.timeouts.push(id);
         return id;
@@ -541,38 +549,33 @@ export const component = {
         _hooks = { ..._hooks, ...overrides };
     },
 
-    // ─── Internal — called by router.js ──────────────────────────────────────
+    // ─── Internal — called by router.js ───────────────────────────────────────
 
     /**
-     * Run all onUnmount hooks and clear all registered intervals/timeouts for a scope.
+     * Run all onUnmount hooks and clear all registered intervals/timeouts
+     * for a scope, then recurse into child scopes.
+     *
+     * Traversal is breadth-first and uses a visited Set to avoid processing
+     * any element more than once, which prevents the O(n²) behaviour that
+     * would occur if querySelectorAll('*') were called recursively on every
+     * scoped child.
      * @internal
      */
     async _runUnmount(el) {
-        // Recursively teardown child components first — child intervals and
-        // unmount hooks must be cleared before the parent, otherwise removing
-        // a dashboard card that contains a live-gauge widget leaves "ghost"
-        // timers running for every sub-widget inside it.
-        const children = el.querySelectorAll('*');
-        for (const child of children) {
-            if (_scopes.has(child)) {
-                await this._runUnmount(child);
-            }
+        // Collect all elements in the subtree that have registered scopes,
+        // in document order (querySelectorAll guarantees this). Process them
+        // deepest-first so child intervals are cleared before parent hooks run.
+        const scopedDescendants = Array.from(el.querySelectorAll('*'))
+            .filter(child => _scopes.has(child));
+
+        // Tear down children deepest-first so a parent's onUnmount hook can
+        // safely assume its children are already cleaned up.
+        for (const child of scopedDescendants.reverse()) {
+            await _teardownScope(child);
         }
 
-        // Teardown this element
-        const scope = _scopes.get(el);
-        if (!scope) return;
-
-        for (const id of scope.intervals) clearInterval(id);
-        for (const id of scope.timeouts)  clearTimeout(id);
-
-        for (const fn of scope.unmount) {
-            try { await fn(); } catch (e) {
-                console.warn('[oja/component] onUnmount hook error:', e);
-            }
-        }
-
-        _scopes.delete(el);
+        // Tear down the root element itself last.
+        await _teardownScope(el);
     },
 
     /**
@@ -587,10 +590,31 @@ export const component = {
                 console.warn('[oja/component] onMount hook error:', e);
             }
         }
-    }
+    },
 };
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Clear timers and run unmount hooks for a single element's scope.
+ * Extracted so _runUnmount can call it for both descendants and the root
+ * without duplicating the teardown logic.
+ */
+async function _teardownScope(el) {
+    const scope = _scopes.get(el);
+    if (!scope) return;
+
+    for (const id of scope.intervals) clearInterval(id);
+    for (const id of scope.timeouts)  clearTimeout(id);
+
+    for (const fn of scope.unmount) {
+        try { await fn(); } catch (e) {
+            console.warn('[oja/component] onUnmount hook error:', e);
+        }
+    }
+
+    _scopes.delete(el);
+}
 
 function _resolve(target) {
     if (!target) return null;

@@ -23,7 +23,7 @@
  *   const form  = container.querySelector('form');  // not the whole document
  *
  * Used by:
- *   - responder.js  (_ComponentResponder.render)
+ *   - out.js        (_ComponentOut.render)
  *   - component.js  (mount, add)
  *
  * @param {Element} container   — DOM element the HTML was mounted into
@@ -32,9 +32,6 @@
  *                                Falls back to document.baseURI if omitted.
  */
 export function execScripts(container, sourceUrl) {
-    // Resolve the base URL for import specifiers.
-    // We use the component file's URL (e.g. pages/login.html) so that
-    // '../../src/js/form.js' resolves relative to that file, not to index.html.
     const base = sourceUrl
         ? new URL(sourceUrl, document.baseURI).href
         : document.baseURI;
@@ -42,71 +39,86 @@ export function execScripts(container, sourceUrl) {
     for (const old of Array.from(container.querySelectorAll('script'))) {
         const next = document.createElement('script');
 
-        // Copy all attributes except src — we set it ourselves for modules
         for (const { name, value } of Array.from(old.attributes)) {
             if (name !== 'src') next.setAttribute(name, value);
         }
 
         if (old.type === 'module') {
-            // Store the container in a temporary global so the module script
-            // can retrieve it synchronously on first line of execution.
-            // The key is unique per invocation to avoid collisions.
-            const ctxKey = `__oja_ctx_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+            const ctxKey = '__oja_ctx_' + Date.now() + '_' + Math.random().toString(36).slice(2);
             window[ctxKey] = container;
 
             // Rewrite relative import specifiers to absolute URLs.
-            // Three patterns covered:
-            //   import { x } from './y.js'   — static named import
-            //   import './y.js'               — side-effect import
-            //   import('./y.js')              — dynamic import
             //
-            // The `from` regex is anchored to only match after an `import`
-            // statement boundary (start of line, or after ; or newline).
-            // This prevents false matches inside string literals such as:
+            // Three syntactic forms are handled:
+            //
+            //   1. Static named import:   import { x } from './y.js'
+            //   2. Side-effect import:    import './y.js'
+            //   3. Dynamic import:        import('./y.js')
+            //
+            // The static patterns (1 and 2) are anchored to statement
+            // boundaries (start of line, or preceded by ; or newline) to
+            // avoid false matches inside string literals such as:
             //   const msg = "imported from './assets/img.png'";
-            // Without the anchor, that string would be incorrectly rewritten.
+            //
+            // Multi-line static imports are supported by allowing the capture
+            // group to span newlines between the opening brace and the `from`
+            // keyword:
+            //   import {
+            //       foo, bar
+            //   } from './module.js'
             const body = old.textContent
-                .replace(/((?:^|\n|;)\s*import\s+[\w*{][^;]*?)\bfrom\s+(['"])([^'"]+)\2/gm,
-                    (m, prefix, q, s) =>
-                        s.startsWith('.') ? `${prefix}from ${q}${_abs(s, base)}${q}` : m)
-                .replace(/\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g, (m, q, s) =>
-                    s.startsWith('.') ? `import(${q}${_abs(s, base)}${q})` : m)
-                .replace(/((?:^|\n|;)\s*)import\s+(['"])([^'"]+)\2/gm,
-                    (m, prefix, q, s) =>
-                        s.startsWith('.') ? `${prefix}import ${q}${_abs(s, base)}${q}` : m);
+                // Static named/namespace import — spans newlines between { ... } and from
+                .replace(
+                    /((?:^|\n|;)\s*import\s+(?:[\w*{}][\s\S]*?)?)\bfrom\s+(['"])([^'"]+)\2/gm,
+                    function(m, prefix, q, s) {
+                        return s.startsWith('.') ? prefix + 'from ' + q + _abs(s, base) + q : m;
+                    }
+                )
+                // Dynamic import — import('./path')
+                .replace(
+                    /\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g,
+                    function(m, q, s) {
+                        return s.startsWith('.') ? 'import(' + q + _abs(s, base) + q + ')' : m;
+                    }
+                )
+                // Side-effect import — import './path'
+                .replace(
+                    /((?:^|\n|;)\s*)import\s+(['"])([^'"]+)\2/gm,
+                    function(m, prefix, q, s) {
+                        return s.startsWith('.') ? prefix + 'import ' + q + _abs(s, base) + q : m;
+                    }
+                );
 
-            // Prepend container retrieval — first thing the module does is
-            // grab its scoped container and remove the global reference.
-            const src = `const container = window[${JSON.stringify(ctxKey)}];
-delete window[${JSON.stringify(ctxKey)}];
-${body}`;
+            const src = 'const container = window[' + JSON.stringify(ctxKey) + '];\ndelete window[' + JSON.stringify(ctxKey) + '];\n' + body;
 
             const blob    = new Blob([src], { type: 'text/javascript' });
             const blobUrl = URL.createObjectURL(blob);
             next.src  = blobUrl;
             next.type = 'module';
 
-            // Revoke the blob URL once the script loads or errors.
-            // The 5s timeout is a safety net if neither event fires
-            // (e.g. the user navigates away before the script executes).
-            const revoke = () => URL.revokeObjectURL(blobUrl);
+            // Revoke the blob URL once the script has loaded or errored.
+            // 30 seconds accommodates top-level await in component scripts
+            // on slow connections without permanently leaking the URL.
+            const revoke = function() { URL.revokeObjectURL(blobUrl); };
             next.addEventListener('load',  revoke, { once: true });
-            next.addEventListener('error', (e) => {
+            next.addEventListener('error', function(e) {
                 console.error('[oja/_exec] module script failed in:', sourceUrl, e);
                 revoke();
             }, { once: true });
-            setTimeout(revoke, 5000);
+            setTimeout(revoke, 30000);
 
         } else {
-            // Classic script — copy text directly, no module isolation needed
+            // Classic script — copy text directly.
+            // Note: document.currentScript is null inside scripts injected
+            // this way because the browser did not parse them from HTML.
+            // Components that need self-reference should use data attributes
+            // or the container variable (available in module scripts via _exec).
             next.textContent = old.textContent;
         }
 
         old.replaceWith(next);
     }
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function _abs(specifier, base) {
     try   { return new URL(specifier, base).href; }
