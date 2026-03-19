@@ -323,6 +323,7 @@
         }
 
         if (p === 'listening') {
+            btnSpeak.style.transform = 'scale(0.96)';
             btnSpeak.className   = 'btn-speak active';
             btnSpeak.textContent = '🔴 Listening… release to stop';
             hintEl.textContent   = 'Say all the words now';
@@ -399,6 +400,7 @@
     on(btnSpeak, 'mouseup',    stopListening);
     on(btnSpeak, 'mouseleave', stopListening);
     on(btnSpeak, 'touchend',   stopListening);
+
 
     on(btnNext, 'click', () => {
         if (levelIdx() < LEVELS.length - 1) setLevelIdx(levelIdx() + 1);
