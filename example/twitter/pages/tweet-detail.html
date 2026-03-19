@@ -1,0 +1,84 @@
+<div>
+    <div class="header" style="display:flex;align-items:center;gap:16px">
+        <a href="#/" style="color:var(--text);text-decoration:none;font-size:20px">←</a>
+        <h1>Tweet</h1>
+    </div>
+
+    <div id="single-tweet">
+        <template data-each="tweetItem" data-as="t">
+            <div class="tweet" data-tweet-id="{{t.id}}"
+                 style="padding:16px;border-bottom:1px solid var(--border)">
+                <div class="avatar">{{if .t.userAvatar}}{{t.userAvatar}}{{else}}{{currentUser.avatar}}{{end}}</div>
+                <div style="flex:1">
+                    <div class="tweet-header">
+                        <span class="tweet-name">{{if .t.userName}}{{t.userName}}{{else}}{{currentUser.name}}{{end}}</span>
+                        <span class="tweet-username">@{{if .t.userUsername}}{{t.userUsername}}{{else}}{{currentUser.username}}{{end}}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div style="padding:16px;border-bottom:1px solid var(--border)">
+                <p style="font-size:23px;line-height:1.4;margin-bottom:16px">{{t.content}}</p>
+                <div style="color:var(--text-secondary);font-size:15px;margin-bottom:16px">
+                    {{t.timestamp | ago}} · Twitter Web App
+                </div>
+                <div style="display:flex;gap:24px;border-top:1px solid var(--border);padding-top:16px;color:var(--text-secondary)">
+                    <span><strong style="color:var(--text)">{{t.retweets}}</strong> Retweets</span>
+                    <span><strong style="color:var(--text)">{{t.likes}}</strong> Likes</span>
+                </div>
+            </div>
+
+            <div class="tweet-stats" style="padding:4px 16px;border-bottom:1px solid var(--border)">
+                <span class="tweet-stat" data-action="reply" style="font-size:20px">💬 {{t.replies}}</span>
+                <span class="tweet-stat {{if .t.retweeted}}retweeted{{end}}" data-action="retweet" style="font-size:20px">🔁</span>
+                <span class="tweet-stat {{if .t.liked}}liked{{end}}" data-action="like" style="font-size:20px">❤️</span>
+                <span class="tweet-stat" data-action="share" style="font-size:20px">📤</span>
+            </div>
+        </template>
+        <div data-empty="tweetItem" style="padding:40px;text-align:center;color:var(--text-secondary)">Tweet not found</div>
+    </div>
+
+    <div class="compose-box" style="border-bottom:1px solid var(--border)">
+        <div class="avatar">{{currentUser.avatar}}</div>
+        <div class="compose-content">
+            <form id="replyForm">
+                <textarea name="content" placeholder="Tweet your reply" maxlength="280"></textarea>
+                <div class="compose-footer">
+                    <div></div>
+                    <button type="submit" class="compose-submit" data-loading="Replying...">Reply</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    /* global props, find */
+    import { effect, each, form, notify, context, component } from '../../../build/oja.core.esm.js';
+
+    const disposeFeed = effect(() => {
+        const tweetId = props.params?.id;
+        const tweet = props.tweets.find(t => t.id === tweetId);
+        const feedEl = find('#single-tweet');
+        if (feedEl) each(feedEl, 'tweetItem', tweet ?[tweet] :[]);
+    });
+
+    const[tweets, setTweets] = context('tweets');
+
+    form.on('#replyForm', {
+        submit: (data) => {
+            if (!data.content?.trim()) throw new Error("Can't reply with nothing!");
+
+            const tweetId = props.params?.id;
+            if (tweetId) {
+                setTweets(tweets().map(t => t.id === tweetId ? { ...t, replies: t.replies + 1 } : t));
+            }
+
+            find('#replyForm').reset();
+            notify.success('Reply posted!');
+        },
+        error: (err) => notify.error(err.message),
+    });
+
+    component.onUnmount(disposeFeed);
+</script>

@@ -32,7 +32,7 @@
  *   import { context } from '../oja/reactive.js';
  *
  *   // Define once (e.g. in app.js) — subsequent calls return the same pair
- *   const [isOnline, setOnline] = context('online', true);
+ *   const[isOnline, setOnline] = context('online', true);
  *
  *   // Read anywhere — always the same reactive value
  *   const [isOnline] = context('online');
@@ -62,8 +62,6 @@
  *   and stops after 50 iterations rather than hanging the browser.
  */
 
-// ─── Storage adapter for persistence ──────────────────────────────────────────
-
 const _storage = {
     local: typeof localStorage !== 'undefined' ? localStorage : null,
     session: typeof sessionStorage !== 'undefined' ? sessionStorage : null,
@@ -89,13 +87,10 @@ function _isStorageAvailable(storage) {
     }
 }
 
-// ─── DevTools integration ─────────────────────────────────────────────────────
-
 const DEVTOOLS_KEY = '__OJA_DEVTOOLS__';
 let _devTools = null;
 let _devToolsEnabled = false;
-
-// ─── Reactive System ──────────────────────────────────────────────────────────
+const MAX_FLUSH_DEPTH = 50;
 
 class ReactiveSystem {
     constructor() {
@@ -107,18 +102,14 @@ class ReactiveSystem {
         this._batchDepth = 0;
         this._flushDepth = 0;
 
-        // DevTools tracking
         this._states = new Map();
         this._effects = new Map();
         this._derived = new Map();
         this._nextId = 0;
-        this._actionStack = [];
+        this._actionStack =[];
 
-        // Persistence tracking
-        this._persistentStates = new Map(); // id -> { key, storage, defaultValue }
+        this._persistentStates = new Map();
     }
-
-    // ─── Persistence ─────────────────────────────────────────────────────────
 
     _loadPersistent(key, storage, defaultValue) {
         const storageImpl = _getStorage(storage);
@@ -155,8 +146,6 @@ class ReactiveSystem {
             console.warn(`[oja/reactive] Failed to remove from ${storage}:`, e);
         }
     }
-
-    // ─── DevTools ─────────────────────────────────────────────────────────────
 
     _connectDevTools() {
         if (typeof window === 'undefined') return;
@@ -239,7 +228,7 @@ class ReactiveSystem {
 
     _dispatchAction(action) {
         this._actionStack.push(action);
-        if (this._actionStack.length > 50) {
+        if (this._actionStack.length > MAX_FLUSH_DEPTH) {
             this._actionStack.shift();
         }
 
@@ -276,8 +265,6 @@ class ReactiveSystem {
         }, this._getSnapshot());
     }
 
-    // ─── Core reactivity ─────────────────────────────────────────────────────
-
     state(initialValue, name) {
         return this._createState(initialValue, name);
     }
@@ -286,33 +273,19 @@ class ReactiveSystem {
         const { store = 'local', key = `oja:${name}` } = options;
         const savedValue = this._loadPersistent(key, store, initialValue);
 
-        const [read, write] = this._createState(savedValue, name, {
+        const[read, write] = this._createState(savedValue, name, {
             key,
             storage: store,
             defaultValue: initialValue
         });
 
-        // Cross-tab sync — when another tab writes to the same localStorage key,
-        // the browser fires a 'storage' event in every OTHER tab. We listen for
-        // this and update the reactive signal so the UI reflects the change
-        // without requiring a page refresh.
-        //
-        // Only localStorage triggers 'storage' events across tabs.
-        // sessionStorage is tab-isolated by design, so cross-tab sync only
-        // applies when store === 'local'.
-        //
-        // Example: Tab A changes the 'theme' context → localStorage updates →
-        // Tab B's storage event fires → Tab B's reactive signal updates →
-        // Tab B's effects re-run → Tab B's UI switches theme automatically.
         if (store === 'local' && typeof window !== 'undefined') {
             window.addEventListener('storage', (e) => {
-                // Only react to changes for this exact key from another tab.
-                // e.newValue is null when the key was deleted (i.e. logout).
                 if (e.key === key && e.newValue !== null) {
                     try {
                         write(JSON.parse(e.newValue));
                     } catch {
-                        // Malformed value in storage — ignore rather than crash.
+                        // Ignore
                     }
                 }
             });
@@ -343,18 +316,12 @@ class ReactiveSystem {
             if (typeof newValue === 'function') {
                 newValue = newValue(value);
             }
-            // Skip the equality check for objects — reference equality can't
-            // detect in-place mutation. If a developer does:
-            //   const u = user(); u.name = 'Bisi'; setUser(u);
-            // the reference is identical but the value has changed. We must
-            // always propagate for objects to guarantee UI consistency.
             const isObject = newValue !== null && typeof newValue === 'object';
             if (!isObject && value === newValue) return;
 
             const oldValue = value;
             value = newValue;
 
-            // Persist if configured
             if (persistent) {
                 this._savePersistent(persistent.key, persistent.storage, value);
             }
@@ -375,6 +342,8 @@ class ReactiveSystem {
             this._scheduleEffects([...subscribers]);
         };
 
+        read.__isOjaSignal = true;
+
         this._trackState(id, name, value, initialValue, persistent);
         return [read, write];
     }
@@ -386,7 +355,6 @@ class ReactiveSystem {
         const oldValue = state.value;
         state.value = newValue;
 
-        // Update persistence if configured
         const persistent = this._persistentStates.get(id);
         if (persistent) {
             this._savePersistent(persistent.key, persistent.storage, newValue);
@@ -405,9 +373,6 @@ class ReactiveSystem {
             try {
                 value = fn();
             } catch (e) {
-                // Leave the derived value unchanged rather than silently
-                // setting it to undefined. Emit an event so devtools / loggers
-                // can surface the problem without crashing the effect queue.
                 console.warn('[oja/reactive] derived() threw — value unchanged:', e);
                 this._sendDevToolsUpdate('error:derived', { id, error: e.message });
                 return;
@@ -480,8 +445,8 @@ class ReactiveSystem {
     }
 
     _flush() {
-        if (this._flushDepth >= 50) {
-            const error = '[oja/reactive] Maximum update depth (50) exceeded. Likely a circular dependency.';
+        if (this._flushDepth >= MAX_FLUSH_DEPTH) {
+            const error = `[oja/reactive] Maximum update depth (${MAX_FLUSH_DEPTH}) exceeded. Likely a circular dependency.`;
             console.error(error);
             this._sendDevToolsUpdate('error:max-depth', { depth: this._flushDepth });
 
@@ -492,7 +457,7 @@ class ReactiveSystem {
         }
 
         this._flushDepth++;
-        const queue = [...this._effectQueue];
+        const queue =[...this._effectQueue];
         this._effectQueue.clear();
         this._scheduled = false;
 
@@ -507,8 +472,6 @@ class ReactiveSystem {
         this._sendDevToolsUpdate('flush:end', { depth: this._flushDepth });
         this._flushDepth--;
     }
-
-    // ─── DevTools inspection ─────────────────────────────────────────────────
 
     inspect() {
         return {
@@ -534,11 +497,8 @@ class ReactiveSystem {
     }
 }
 
-// ─── Shared instance ──────────────────────────────────────────────────────────
-
 const _sys = new ReactiveSystem();
 
-// Auto-connect DevTools in development
 if (typeof window !== 'undefined' &&
     (window.location.hostname === 'localhost' ||
         window.location.hostname === '127.0.0.1' ||
@@ -551,12 +511,21 @@ if (typeof window !== 'undefined' &&
     }
 }
 
-export const state   = (v, name) => _sys.state(v, name);
-export const derived = (fn) => _sys.derived(fn);
-export const effect  = (fn) => _sys.effect(fn);
-export const batch   = (fn) => _sys.batch(fn);
+// Creates a reactive state primitive.
+// Returns a tuple with a getter and a setter function.
+export const state = (v, name) => _sys.state(v, name);
 
-// ─── Global named context ─────────────────────────────────────────────────────
+// Creates a derived reactive value based on a computation function.
+// Automatically tracks dependencies accessed during the computation.
+export const derived = (fn) => _sys.derived(fn);
+
+// Registers a side effect that automatically re-runs when its dependencies change.
+// Returns a function to manually dispose the effect.
+export const effect = (fn) => _sys.effect(fn);
+
+// Groups multiple state updates into a single synchronous batch.
+// Prevents intermediate effects from firing until the batch completes.
+export const batch = (fn) => _sys.batch(fn);
 
 const _ctx = new Map();
 
@@ -569,19 +538,6 @@ const _ctx = new Map();
  * @param {string} name          — unique name for this context value
  * @param {any}    [initialValue] — initial value (only used on first call)
  * @returns {[Function, Function]} [read, write] — same as state()
- *
- *   // app.js — define once
- *   const [isOnline, setOnline] = context('online', true);
- *
- *   // any-component.html script — read from anywhere
- *   const [isOnline] = context('online');
- *   effect(() => {
- *       container.querySelector('.status').textContent = isOnline() ? 'Live' : 'Offline';
- *   });
- *
- *   // api.js integration
- *   api.onOffline(() => setOnline(false));
- *   api.onOnline(()  => setOnline(true));
  */
 export function context(name, initialValue) {
     if (!_ctx.has(name)) {
@@ -591,22 +547,6 @@ export function context(name, initialValue) {
     return _ctx.get(name);
 }
 
-/**
- * Create a persistent context value that survives page reloads.
- *
- * @param {string} name          — unique name for this context value
- * @param {any}    initialValue  — default value (used if no saved value exists)
- * @param {Object} options
- *   store : 'local' | 'session' | 'memory' — storage type (default: 'local')
- *   key   : string                          — custom storage key (default: `oja:${name}`)
- * @returns {[Function, Function]} [read, write]
- *
- *   // User preference — survives reload
- *   const [theme, setTheme] = context.persist('theme', 'dark');
- *
- *   // Session-only — cleared when tab closes
- *   const [tabState, setTabState] = context.persist('tabState', {}, { store: 'session' });
- */
 context.persist = (name, initialValue, options = {}) => {
     if (!_ctx.has(name)) {
         const [read, write] = _sys.persistentState(initialValue, name, options);
@@ -615,74 +555,34 @@ context.persist = (name, initialValue, options = {}) => {
     return _ctx.get(name);
 };
 
-/**
- * Check if a named context has been created.
- *
- *   if (context.has('online')) { ... }
- */
 context.has = (name) => _ctx.has(name);
 
-/**
- * Delete a named context entry from the registry.
- * The underlying reactive state is NOT destroyed — any existing [read, write]
- * references held by components will continue to work. This only removes the
- * name-to-pair mapping so the name can be reused or garbage collected.
- *
- * Use in long-lived SPAs that create many short-lived dynamic contexts to
- * prevent the _ctx Map from growing without bound.
- *
- *   // When a feature module unmounts:
- *   context.delete('featureX:filter');
- */
 context.delete = (name) => _ctx.delete(name);
 
-/**
- * Get the current value of a named context synchronously (no subscription).
- * Useful when you just need a value once, not reactive.
- *
- *   const online = context.get('online'); // → true/false
- */
 context.get = (name) => {
     if (!_ctx.has(name)) return undefined;
     const [read] = _ctx.get(name);
     return read();
 };
 
-/**
- * List all registered context names — useful for debugging.
- *
- *   context.keys(); // → ['online', 'authUser', 'theme']
- */
 context.keys = () => [..._ctx.keys()];
 
-/**
- * Clear a persisted context value from storage.
- *
- *   context.clear('theme'); // Removes from localStorage
- */
 context.clear = (name) => {
     if (!_ctx.has(name)) return;
 
     const [read, write] = _ctx.get(name);
-    const current = read();
+    read();
     write(undefined);
 
-    // Find and remove from persistent storage
     for (const [id, data] of _sys._persistentStates) {
-        const state = _sys._states.get(id);
-        if (state && state.name === name) {
+        const stateEntry = _sys._states.get(id);
+        if (stateEntry && stateEntry.name === name) {
             _sys._removePersistent(data.key, data.storage);
             break;
         }
     }
 };
 
-/**
- * DevTools integration for context inspection.
- *
- *   // In browser console:
- *   context.inspect()  // → { online: true, authUser: {...}, theme: 'dark' }
- */
 context.inspect = () => {
     const snapshot = {};
     for (const [name, [read]] of _ctx) {
@@ -690,8 +590,6 @@ context.inspect = () => {
     }
     return snapshot;
 };
-
-// ─── DevTools global export ───────────────────────────────────────────────────
 
 if (typeof window !== 'undefined') {
     window.__OJA_REACTIVE__ = {

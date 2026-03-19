@@ -1,0 +1,113 @@
+<div>
+    <div class="header">
+        <h1>Home</h1>
+    </div>
+
+    <div class="compose-box">
+        <div class="avatar">{{currentUser.avatar}}</div>
+        <div class="compose-content">
+            <form id="composeForm">
+                <textarea name="content" placeholder="What's happening?"
+                          maxlength="280" id="compose-textarea"></textarea>
+                <div class="compose-footer">
+                    <div class="compose-actions">
+                        <button type="button" disabled>📷</button>
+                        <button type="button" disabled>🎥</button>
+                        <button type="button" disabled>📊</button>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:12px">
+                        <span id="charCount" style="color:var(--text-secondary);font-size:14px">0/280</span>
+                        <button type="submit" class="compose-submit" data-loading="Posting...">Tweet</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="feed">
+        <template data-each="tweets" data-as="t">
+            <div class="tweet" data-tweet-id="{{t.id}}">
+                <div class="avatar">{{if .t.userAvatar}}{{t.userAvatar}}{{else}}{{currentUser.avatar}}{{end}}</div>
+                <div style="flex:1">
+                    <div class="tweet-header">
+                        <span class="tweet-name">{{if .t.userName}}{{t.userName}}{{else}}{{currentUser.name}}{{end}}</span>
+                        <span class="tweet-username">@{{if .t.userUsername}}{{t.userUsername}}{{else}}{{currentUser.username}}{{end}}</span>
+                        <span class="tweet-time">{{t.timestamp | ago}}</span>
+                    </div>
+                    <div class="tweet-content">
+                        <a href="#/tweet/{{t.id}}" style="color:inherit;text-decoration:none;display:block">
+                            <p>{{t.content}}</p>
+                        </a>
+                    </div>
+                    <div class="tweet-stats">
+                        <span class="tweet-stat" data-action="reply">💬 {{t.replies}}</span>
+                        <span class="tweet-stat {{if .t.retweeted}}retweeted{{end}}" data-action="retweet">🔁 {{t.retweets}}</span>
+                        <span class="tweet-stat {{if .t.liked}}liked{{end}}" data-action="like">❤️ {{t.likes}}</span>
+                        <span class="tweet-stat" data-action="share">📤</span>
+                    </div>
+                </div>
+            </div>
+        </template>
+        <div data-empty="tweets" class="empty-state" style="display:none;padding:40px;text-align:center;color:var(--text-secondary)">
+            No tweets yet. Be the first!
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    /* global props, container, find */
+    import { effect, state, form, notify, each, context, on, component } from '../../../build/oja.core.esm.js';
+
+    const MAX_CHARS = 280;
+    const WARN_CHARS = 260;
+
+    const [content, setContent] = state('');
+
+    on('#compose-textarea', 'input', (e) => setContent(e.target.value));
+
+    const disposeCounter = effect(() => {
+        const len = content().length;
+        const counter = find('#charCount');
+        if (!counter) return;
+
+        counter.textContent = `${len}/${MAX_CHARS}`;
+        counter.style.color = len > WARN_CHARS
+            ? (len > MAX_CHARS ? 'var(--error)' : 'var(--warning)')
+            : 'var(--text-secondary)';
+    });
+
+    const disposeFeed = effect(() => {
+        const feedEl = find('#feed');
+        if (feedEl) each(feedEl, 'tweets', props.tweets);
+    });
+
+    const [tweets, setTweets] = context('tweets');
+
+    form.on('#composeForm', {
+        submit: (data) => {
+            if (!data.content.trim()) throw new Error("Can't tweet nothing!");
+
+            const newTweet = {
+                id: Date.now().toString(),
+                userId: props.currentUser.id,
+                userName: props.currentUser.name,
+                userUsername: props.currentUser.username,
+                userAvatar: props.currentUser.avatar,
+                content: data.content,
+                likes: 0, retweets: 0, replies: 0,
+                timestamp: Date.now(), liked: false, retweeted: false
+            };
+
+            setTweets([newTweet, ...props.tweets]);
+            find('#composeForm').reset();
+            setContent('');
+            notify.success('Tweet posted!');
+        },
+        error: (err) => notify.error(err.message)
+    });
+
+    component.onUnmount(() => {
+        disposeCounter();
+        disposeFeed();
+    });
+</script>

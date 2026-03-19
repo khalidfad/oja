@@ -1,3 +1,4 @@
+// src/js/core/template.js
 /**
  * oja/template.js
  * Fills HTML with data. Two syntax styles, both valid HTML, no compiler.
@@ -98,55 +99,29 @@ let _i18n = {
     }
 };
 
-const _filters = new Map([
-    ['upper',   (s)       => String(s ?? '').toUpperCase()],['lower',   (s)       => String(s ?? '').toLowerCase()],['title',   (s)       => String(s ?? '').replace(/\b\w/g, l => l.toUpperCase())],['json',    (v)       => JSON.stringify(v)],['date',    (ts)      => ts ? new Date(ts).toLocaleDateString() : ''],['time',    (ts)      => ts ? new Date(ts).toLocaleTimeString() : ''],
-    ['ago',     (ts)      => _timeAgo(ts)],['default', (v, dflt) => (v !== undefined && v !== null && v !== '') ? v : (dflt ?? '')],['trunc',   (s, n)    => { const str = String(s ?? ''); return str.length > n ? str.slice(0, n) + '…' : str; }],['bytes',   (n)       => _formatBytes(Number(n) || 0)],
-    ['t',       (key, ...args) => _translate(key, ...args)],['pluralize', (count, word, pluralForm) => _i18n.pluralize(count, word, pluralForm)],
+const _filters = new Map([['upper',   (s)       => String(s ?? '').toUpperCase()],['lower',   (s)       => String(s ?? '').toLowerCase()],['title',   (s)       => String(s ?? '').replace(/\b\w/g, l => l.toUpperCase())],['json',    (v)       => JSON.stringify(v)],['date',    (ts)      => ts ? new Date(ts).toLocaleDateString() : ''],['time',    (ts)      => ts ? new Date(ts).toLocaleTimeString() : ''],
+    ['ago',     (ts)      => _timeAgo(ts)],['default', (v, dflt) => (v !== undefined && v !== null && v !== '') ? v : (dflt ?? '')],['trunc',   (s, n)    => { const str = String(s ?? ''); return str.length > n ? str.slice(0, n) + '…' : str; }],['bytes',   (n)       => _formatBytes(Number(n) || 0)],['t',       (key, ...args) => _translate(key, ...args)],['pluralize', (count, word, pluralForm) => _i18n.pluralize(count, word, pluralForm)],
 ]);
 
 const _cache = new Map();
 const TPL_PREFIX = '__OJA_TPL_';
 
-/**
- * Process an HTML string — runs Go-style block statements then interpolates.
- * Returns a new HTML string. Safe to set as innerHTML.
- * Values are XSS-escaped. Use renderRaw() for trusted HTML values.
- */
 export function render(html, data = {}) {
     return _processBlocks(html, data, true);
 }
 
-/**
- * Same as render() but does not HTML-escape values.
- * Only use when values are already safe HTML.
- */
 export function renderRaw(html, data = {}) {
     return _processBlocks(html, data, false);
 }
 
-/**
- * Fill an already-mounted DOM container with data.
- * Handles: text interpolation, data-if, data-if-not, data-if-class, data-bind.
- */
 export function fill(container, data = {}) {
+    if (!container) return;
     _walkDOM(container, data);
 }
 
-/**
- * Process a data-each loop inside a container.
- *
- * @param {Element}  container
- * @param {string}   name       — matches <template data-each="name">
- * @param {Array}    items
- * @param {Object}   options
- *   filter  : (item) => bool
- *   sort    : (a, b) => number
- *   map     : (item, index) => object
- *   chunk   : number              — render N per animation frame (non-blocking)
- *   empty   : string | Out        — what to show when list is empty
- *   loading : string | Out        — what to show while chunked render runs
- */
-export function each(container, name, items = [], options = {}) {
+export function each(container, name, items =[], options = {}) {
+    if (!container) return;
+
     const tpl = container.querySelector(`template[data-each="${name}"]`);
     if (!tpl) {
         console.warn(`[oja/template] <template data-each="${name}"> not found`);
@@ -223,8 +198,6 @@ function _translate(key, ...args) {
     return message;
 }
 
-// Processes Go-style block statements and interpolates data.
-// Masks template tags to prevent premature evaluation.
 function _processBlocks(html, data, escape) {
     if (!html.includes('{{')) return html;
 
@@ -306,8 +279,7 @@ function _evalTemplate(src, data, escape) {
             } else {
                 list.forEach((item, index) => {
                     const ctx = {
-                        ...data,
-                        [asVar]: item,
+                        ...data,[asVar]: item,
                         '.':     item,
                         Index:   index,
                         First:   index === 0,

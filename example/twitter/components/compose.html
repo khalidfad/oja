@@ -1,0 +1,75 @@
+<div class="compose-box" style="border-bottom:none; padding:0">
+    <div class="avatar">{{currentUser.avatar}}</div>
+    <div class="compose-content">
+        <form id="modalComposeForm">
+            <textarea name="content" placeholder="What's happening?" maxlength="280"
+                      style="min-height:120px" id="modal-textarea" required></textarea>
+
+            <div class="compose-footer">
+                <div class="compose-actions">
+                    <button type="button" disabled>📷</button>
+                    <button type="button" disabled>🎥</button>
+                    <button type="button" disabled>📊</button>
+                </div>
+                <div class="flex gap-2">
+                    <span id="modalCharCount" style="color:var(--text-secondary)">0/280</span>
+                    <button type="submit" class="compose-submit" data-loading="Posting...">Tweet</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script type="module">
+    import { effect, state, form, notify, modal, context, on } from '../../../build/oja.core.esm.js';
+
+    const MAX_CHARS = 280;
+    const WARN_CHARS = 260;
+
+    const [content, setContent] = state('');
+
+    // Updates character count state when typing
+    // Limits input based on predefined maximum characters
+    on('#modal-textarea', 'input', (e) => setContent(e.target.value));
+
+    // Reactively updates the character counter UI
+    // Changes text color to warning or error states based on length
+    effect(() => {
+        const len = content().length;
+        const counter = find('#modalCharCount');
+        counter.textContent = `${len}/${MAX_CHARS}`;
+        counter.style.color = len > WARN_CHARS
+            ? (len > MAX_CHARS ? 'var(--error)' : 'var(--warning)')
+            : 'var(--text-secondary)';
+    });
+
+    const [tweets, setTweets] = context('tweets');
+
+    // Handles modal tweet submission
+    // Synthesizes new tweet object and prepends it to global context
+    form.on('#modalComposeForm', {
+        submit: (data) => {
+            if (!data.content.trim()) throw new Error("Can't tweet nothing!");
+
+            const newTweet = {
+                id: Date.now().toString(),
+                userId: props.currentUser.id,
+                userName: props.currentUser.name,
+                userUsername: props.currentUser.username,
+                userAvatar: props.currentUser.avatar,
+                content: data.content,
+                likes: 0,
+                retweets: 0,
+                replies: 0,
+                timestamp: Date.now(),
+                liked: false,
+                retweeted: false
+            };
+
+            setTweets([newTweet, ...tweets()]);
+            modal.close();
+            notify.success('Tweet posted!');
+        },
+        error: (err) => notify.error(err.message)
+    });
+</script>

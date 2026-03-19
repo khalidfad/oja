@@ -1,0 +1,28 @@
+<form id="editProfileForm" style="display:flex; flex-direction:column; gap:20px;">
+    <div>
+        <label style="color:var(--text-secondary); font-size:14px; margin-bottom:8px; display:block; font-weight:bold;">Name</label>
+        <input type="text" name="name" value="{{currentUser.name}}" required
+               style="width:100%; padding:12px; background:transparent; border:1px solid var(--border); color:var(--text); border-radius:4px; outline:none; font-size:16px;">
+    </div>
+    <div>
+        <label style="color:var(--text-secondary); font-size:14px; margin-bottom:8px; display:block; font-weight:bold;">Bio</label>
+        <textarea name="bio" required
+                  style="width:100%; padding:12px; background:transparent; border:1px solid var(--border); color:var(--text); border-radius:4px; outline:none; font-size:16px; min-height:120px; resize:none;">{{currentUser.bio}}</textarea>
+    </div>
+    <button type="submit" class="post-button" style="width:100%; margin-top:8px;">Save</button>
+</form>
+
+<script type="module">
+    /* global props, find */
+    import { form, context, modal, notify } from '../../../build/oja.core.esm.js';
+
+    const [user, setUser] = context('user');
+
+    form.on('#editProfileForm', {
+        submit: (data) => {
+            setUser({ ...user(), name: data.name, bio: data.bio });
+            modal.close();
+            notify.success('Profile updated successfully');
+        }
+    });
+</script>

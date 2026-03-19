@@ -1,0 +1,134 @@
+<div>
+    <div class="header">
+        <h1>Profile</h1>
+    </div>
+
+    <div class="profile-header"></div>
+
+    <div class="profile-avatar">{{currentUser.avatar}}</div>
+
+    <div class="profile-info">
+        <div style="display:flex;justify-content:space-between;align-items:start">
+            <div>
+                <div class="profile-name">{{currentUser.name}}</div>
+                <div class="text-secondary">@{{currentUser.username}}</div>
+            </div>
+            <button id="edit-profile-btn" class="post-button"
+                    style="width:auto;padding:8px 24px;margin:0">
+                Edit profile
+            </button>
+        </div>
+
+        <div class="profile-bio">{{currentUser.bio}}</div>
+
+        <div class="profile-meta">
+            <span>📍 San Francisco</span>
+            <span>🔗 oja.simple</span>
+            <span>📅 Joined March 2024</span>
+        </div>
+
+        <div style="display:flex;gap:16px">
+            <span><strong>{{currentUser.following}}</strong> Following</span>
+            <span><strong>{{currentUser.followers}}</strong> Followers</span>
+        </div>
+    </div>
+
+    <div style="display:flex;border-bottom:1px solid var(--border)" id="profile-tabs">
+        <button class="profile-tab active" data-tab="tweets"
+                style="flex:1;padding:16px;background:transparent;border:none;color:var(--text);font-weight:700;border-bottom:2px solid var(--primary);cursor:pointer">
+            Tweets
+        </button>
+        <button class="profile-tab" data-tab="replies"
+                style="flex:1;padding:16px;background:transparent;border:none;color:var(--text-secondary);cursor:pointer">
+            Replies
+        </button>
+        <button class="profile-tab" data-tab="media"
+                style="flex:1;padding:16px;background:transparent;border:none;color:var(--text-secondary);cursor:pointer">
+            Media
+        </button>
+        <button class="profile-tab" data-tab="likes"
+                style="flex:1;padding:16px;background:transparent;border:none;color:var(--text-secondary);cursor:pointer">
+            Likes
+        </button>
+    </div>
+
+    <div id="profile-tweets">
+        <template data-each="tweets" data-as="t">
+            <div class="tweet" data-tweet-id="{{t.id}}">
+                <div class="avatar">{{currentUser.avatar}}</div>
+                <div style="flex:1">
+                    <div class="tweet-header">
+                        <span class="tweet-name">{{currentUser.name}}</span>
+                        <span class="tweet-username">@{{currentUser.username}}</span>
+                        <span class="tweet-time">{{t.timestamp | ago}}</span>
+                    </div>
+                    <div class="tweet-content">
+                        <a href="#/tweet/{{t.id}}" style="color:inherit;text-decoration:none;display:block">
+                            <p>{{t.content}}</p>
+                        </a>
+                    </div>
+                    <div class="tweet-stats">
+                        <span class="tweet-stat" data-action="reply">💬 {{t.replies}}</span>
+                        <span class="tweet-stat {{if .t.retweeted}}retweeted{{end}}" data-action="retweet">🔁 {{t.retweets}}</span>
+                        <span class="tweet-stat {{if .t.liked}}liked{{end}}" data-action="like">❤️ {{t.likes}}</span>
+                    </div>
+                </div>
+            </div>
+        </template>
+        <div data-empty="tweets" style="display:none;padding:40px;text-align:center;color:var(--text-secondary)">
+            No tweets yet
+        </div>
+    </div>
+
+    <div id="profile-empty-state" style="display:none;padding:40px;text-align:center;color:var(--text-secondary)">
+        Nothing to see here yet.
+    </div>
+</div>
+
+<script type="module">
+    /* global props, container, find */
+    import { effect, each, on, modal, Out, component } from '../../../build/oja.core.esm.js';
+
+    const disposeFeed = effect(() => {
+        const myTweets = props.tweets.filter(t => t.userId === props.currentUser.id);
+        const feedEl = find('#profile-tweets');
+        if (feedEl) each(feedEl, 'tweets', myTweets);
+    });
+
+    on('#edit-profile-btn', 'click', () => {
+        Out.component('components/edit-profile.html', { currentUser: props.currentUser })
+            .render(document.getElementById('modal-edit-profile-body'));
+        modal.open('editProfileModal');
+    });
+
+    on('#profile-tabs', 'click', (e, el) => {
+        const btn = e.target.closest('.profile-tab');
+        if (!btn) return;
+
+        container.querySelectorAll('.profile-tab').forEach(t => {
+            t.classList.remove('active');
+            t.style.color = 'var(--text-secondary)';
+            t.style.borderBottom = 'none';
+            t.style.fontWeight = 'normal';
+        });
+
+        btn.classList.add('active');
+        btn.style.color = 'var(--text)';
+        btn.style.borderBottom = '2px solid var(--primary)';
+        btn.style.fontWeight = '700';
+
+        const tab = btn.dataset.tab;
+        const tweetsFeed = find('#profile-tweets');
+        const emptyState = find('#profile-empty-state');
+
+        if (tab === 'tweets') {
+            tweetsFeed.style.display = 'block';
+            emptyState.style.display = 'none';
+        } else {
+            tweetsFeed.style.display = 'none';
+            emptyState.style.display = 'block';
+        }
+    });
+
+    component.onUnmount(disposeFeed);
+</script>

@@ -1,0 +1,52 @@
+<div>
+    <div class="header">
+        <h1>Explore</h1>
+    </div>
+
+    <div style="padding:16px">
+        <h2 style="margin-bottom:16px">Popular right now</h2>
+
+        <div id="popular-feed">
+            <template data-each="tweets" data-as="t">
+                <div class="tweet" data-tweet-id="{{t.id}}"
+                     style="background:var(--surface);border-radius:16px;margin-bottom:16px">
+                    <div class="avatar">{{if .t.userAvatar}}{{t.userAvatar}}{{else}}#{{end}}</div>
+                    <div style="flex:1">
+                        <div class="tweet-header">
+                            <span class="tweet-name">{{if .t.userName}}{{t.userName}}{{else}}User{{end}}</span>
+                            <span class="tweet-username">@{{if .t.userUsername}}{{t.userUsername}}{{else}}user{{end}}</span>
+                            <span class="tweet-time">{{t.timestamp | ago}}</span>
+                        </div>
+                        <div class="tweet-content">
+                            <a href="#/tweet/{{t.id}}" style="color:inherit;text-decoration:none;display:block">
+                                <p>{{t.content}}</p>
+                            </a>
+                        </div>
+                        <div class="tweet-stats">
+                            <span class="tweet-stat {{if .t.liked}}liked{{end}}" data-action="like">❤️ {{t.likes}}</span>
+                            <span class="tweet-stat {{if .t.retweeted}}retweeted{{end}}" data-action="retweet">🔁 {{t.retweets}}</span>
+                        </div>
+                    </div>
+                </div>
+            </template>
+            <div data-empty="tweets" style="display:none;padding:40px;text-align:center;color:var(--text-secondary)">
+                Nothing trending right now
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    /* global props, find */
+    import { effect, each, component } from '../../../build/oja.core.esm.js';
+
+    const POPULAR_THRESHOLD = 300;
+
+    const disposeFeed = effect(() => {
+        const popular = props.tweets.filter(t => t.likes > POPULAR_THRESHOLD);
+        const feedEl = find('#popular-feed');
+        if (feedEl) each(feedEl, 'tweets', popular);
+    });
+
+    component.onUnmount(disposeFeed);
+</script>
