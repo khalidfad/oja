@@ -1,3 +1,4 @@
+// src/js/ui/canvas.js
 /**
  * oja/canvas.js
  * Canvas utilities — drawing, image processing, and visualization helpers.
@@ -98,195 +99,192 @@
  * @property {number} dpr - Device pixel ratio
  */
 
-// ─── Core utilities ───────────────────────────────────────────────────────────
+// ─── State ────────────────────────────────────────────────────────────────────
 
 const _responsiveInstances = new WeakMap(); // canvas -> { observer, drawFn }
-const _animationInstances = new WeakMap(); // canvas -> { rafId, drawFn, startTime }
+const _animationInstances  = new WeakMap(); // canvas -> { rafId, drawFn, startTime }
 
-/**
- * Get canvas element and context with proper sizing
- */
-export function get(target, options = {}) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-    if (!canvas || !(canvas instanceof HTMLCanvasElement)) {
-        console.warn(`[oja/canvas] Invalid canvas target: ${target}`);
+function _resolveCanvas(target) {
+    const el = typeof target === 'string' ? document.querySelector(target) : target;
+    if (!el || !(el instanceof HTMLCanvasElement)) {
+        console.warn('[oja/canvas] Invalid canvas target:', target);
         return null;
     }
+    return el;
+}
+
+/**
+ * Return the logical size (CSS pixels) of a canvas and its device pixel ratio.
+ * This is used internally wherever we need to pass a size object to a draw
+ * callback — callers should work in CSS pixels, not raw canvas pixels.
+ */
+function _sizeOf(el) {
+    return {
+        width:  el.clientWidth,
+        height: el.clientHeight,
+        dpr:    el.width / (el.clientWidth || 1),
+    };
+}
+
+// ─── Core utilities ───────────────────────────────────────────────────────────
+
+/**
+ * Get a canvas 2D context, optionally setting physical dimensions.
+ * Scales the context once for the device pixel ratio so all drawing
+ * coordinates are in CSS pixels.
+ *
+ * Call once during setup, not on every frame — calling get() repeatedly
+ * on the same canvas would accumulate DPR scale transforms.
+ */
+export function get(target, options = {}) {
+    const el = _resolveCanvas(target);
+    if (!el) return null;
 
     const { width, height, dpr = window.devicePixelRatio || 1 } = options;
 
-    if (width) canvas.width = width * dpr;
-    if (height) canvas.height = height * dpr;
+    if (width)  { el.width  = width  * dpr; el.style.width  = width  + 'px'; }
+    if (height) { el.height = height * dpr; el.style.height = height + 'px'; }
 
-    if (width) canvas.style.width = width + 'px';
-    if (height) canvas.style.height = height + 'px';
+    const ctx = el.getContext('2d');
 
-    const ctx = canvas.getContext('2d');
-    if (dpr !== 1) ctx.scale(dpr, dpr);
+    // Scale once so draw code works in CSS pixels regardless of screen density.
+    // This must only run when dimensions are being set, not on a bare get().
+    if (dpr !== 1 && (width || height)) ctx.scale(dpr, dpr);
 
     return ctx;
 }
 
 /**
- * Clear canvas
+ * Clear a canvas.
  */
 export function clear(target) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
-
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const el = _resolveCanvas(target);
+    if (!el) return;
+    el.getContext('2d').clearRect(0, 0, el.width, el.height);
 }
 
 /**
- * Resize canvas
+ * Resize a canvas to new CSS pixel dimensions, accounting for device pixel ratio.
+ * Resets the transform cleanly so the DPR scale is correct after resize.
  */
 export function resize(target, width, height) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
-
-    if (!canvas) return;
+    const el = _resolveCanvas(target);
+    if (!el) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const ctx = canvas.getContext('2d');
+    const ctx = el.getContext('2d');
 
-    // Save context state
-    ctx.save();
+    el.width  = width  * dpr;
+    el.height = height * dpr;
+    el.style.width  = width  + 'px';
+    el.style.height = height + 'px';
 
-    // Resize
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = width + 'px';
-    canvas.style.height = height + 'px';
-
-    // Restore scale
+    // Reset the transform to identity then apply DPR scale. ctx.save/restore
+    // is intentionally not used here — restore would undo the new scale,
+    // leaving the canvas incorrectly sized for subsequent draw calls.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-
-    // Restore other state
-    ctx.restore();
+    if (dpr !== 1) ctx.scale(dpr, dpr);
 }
 
 /**
- * Get canvas size info
+ * Return the logical and physical dimensions of a canvas.
  */
 export function getSize(target) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
-
-    if (!canvas) return null;
-
+    const el = _resolveCanvas(target);
+    if (!el) return null;
     return {
-        width: canvas.width,
-        height: canvas.height,
-        styleWidth: canvas.clientWidth,
-        styleHeight: canvas.clientHeight,
-        dpr: canvas.width / canvas.clientWidth || 1,
+        width:       el.width,
+        height:      el.height,
+        styleWidth:  el.clientWidth,
+        styleHeight: el.clientHeight,
+        dpr:         el.width / (el.clientWidth || 1),
     };
 }
 
 /**
- * Draw with automatic context save/restore
+ * Draw with automatic context save/restore.
+ * The draw callback receives (ctx, size) where size is in CSS pixels.
  */
 export function draw(target, drawFn) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
+    const el = _resolveCanvas(target);
+    if (!el) return;
 
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
+    const ctx = el.getContext('2d');
     ctx.save();
-
-    drawFn(ctx, {
-        width: canvas.clientWidth,
-        height: canvas.clientHeight,
-        dpr: canvas.width / canvas.clientWidth || 1,
-    });
-
+    drawFn(ctx, _sizeOf(el));
     ctx.restore();
 }
 
 // ─── Responsive canvas ────────────────────────────────────────────────────────
 
 /**
- * Make canvas responsive - redraws on resize
+ * Make a canvas responsive — redraws automatically whenever its size changes.
+ *
+ * The observer watches the canvas element itself so that both container-driven
+ * and direct resizes are detected. Observing only the parent misses cases where
+ * the canvas is sized independently via CSS container queries or JS.
  */
 export function responsive(target, drawFn) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
+    const el = _resolveCanvas(target);
+    if (!el) {
+        console.warn('[oja/canvas] responsive() target not found');
+        return { destroy: () => {}, redraw: () => {} };
+    }
 
-    if (!canvas || typeof ResizeObserver === 'undefined') {
+    if (typeof ResizeObserver === 'undefined') {
         console.warn('[oja/canvas] ResizeObserver not supported');
-        return { destroy: () => {} };
+        return { destroy: () => {}, redraw: () => {} };
     }
 
-    // Clean up existing instance
-    if (_responsiveInstances.has(canvas)) {
-        _responsiveInstances.get(canvas).observer.disconnect();
+    // Disconnect any existing instance on this canvas before creating a new one.
+    if (_responsiveInstances.has(el)) {
+        _responsiveInstances.get(el).observer.disconnect();
     }
 
-    const resizeFn = () => {
-        draw(canvas, drawFn);
-    };
+    const redraw = () => draw(el, drawFn);
 
-    const observer = new ResizeObserver(resizeFn);
-    observer.observe(canvas.parentElement || canvas);
+    const observer = new ResizeObserver(redraw);
 
-    _responsiveInstances.set(canvas, { observer, drawFn });
+    // Watch the canvas element directly so resizes triggered by CSS container
+    // queries, explicit style changes, or JS width/height assignments are all
+    // caught — not just resizes of the parent container.
+    observer.observe(el);
 
-    // Initial draw
-    resizeFn();
+    _responsiveInstances.set(el, { observer, drawFn });
+
+    redraw();
 
     return {
         destroy: () => {
             observer.disconnect();
-            _responsiveInstances.delete(canvas);
+            _responsiveInstances.delete(el);
         },
-        redraw: resizeFn,
+        redraw,
     };
 }
 
 // ─── Image loading ────────────────────────────────────────────────────────────
 
 /**
- * Load image into canvas
+ * Load an image into a canvas, resizing the canvas to match.
  */
 export async function loadImage(target, src, options = {}) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
-
-    if (!canvas) return;
+    const el = _resolveCanvas(target);
+    if (!el) return;
 
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.crossOrigin = options.crossOrigin || 'anonymous';
 
         img.onload = () => {
-            const ctx = canvas.getContext('2d');
-
-            if (options.resize) {
-                canvas.width = options.width || img.width;
-                canvas.height = options.height || img.height;
-            } else {
-                canvas.width = img.width;
-                canvas.height = img.height;
-            }
-
-            canvas.style.width = canvas.width + 'px';
-            canvas.style.height = canvas.height + 'px';
-
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const ctx = el.getContext('2d');
+            el.width  = options.width  || img.width;
+            el.height = options.height || img.height;
+            el.style.width  = el.width  + 'px';
+            el.style.height = el.height + 'px';
+            ctx.drawImage(img, 0, 0, el.width, el.height);
             resolve(img);
         };
 
@@ -296,132 +294,107 @@ export async function loadImage(target, src, options = {}) {
 }
 
 /**
- * Apply CSS filter to canvas
+ * Apply a CSS filter to a canvas by redrawing its current pixels through
+ * an offscreen canvas with the filter applied.
+ *
+ * ctx.filter only affects draw operations such as drawImage — it has no
+ * effect on putImageData, which bypasses the filter pipeline entirely.
+ * To apply a filter to existing canvas content we must re-draw via drawImage.
  */
 export function filter(target, filterStr) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
+    const el = _resolveCanvas(target);
+    if (!el) return;
 
-    if (!canvas) return;
+    // Snapshot the current canvas content into an offscreen canvas.
+    const offscreen = document.createElement('canvas');
+    offscreen.width  = el.width;
+    offscreen.height = el.height;
+    offscreen.getContext('2d').drawImage(el, 0, 0);
 
-    const ctx = canvas.getContext('2d');
+    // Redraw back onto the original canvas through the filter.
+    const ctx = el.getContext('2d');
+    ctx.clearRect(0, 0, el.width, el.height);
     ctx.filter = filterStr;
-
-    // Redraw image if exists
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    ctx.putImageData(imageData, 0, 0);
+    ctx.drawImage(offscreen, 0, 0);
+    ctx.filter = 'none';
 }
 
 /**
- * Get image data
+ * Get raw pixel data from a canvas region.
  */
 export function getImageData(target, x = 0, y = 0, width, height) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
-
-    if (!canvas) return null;
-
-    const ctx = canvas.getContext('2d');
-    return ctx.getImageData(
-        x, y,
-        width || canvas.width,
-        height || canvas.height
-    );
+    const el = _resolveCanvas(target);
+    if (!el) return null;
+    const ctx = el.getContext('2d');
+    return ctx.getImageData(x, y, width || el.width, height || el.height);
 }
 
 /**
- * Convert canvas to data URL
+ * Convert canvas contents to a data URL.
  */
 export function toDataURL(target, type = 'image/png', quality = 1) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
-
-    return canvas?.toDataURL(type, quality);
+    const el = _resolveCanvas(target);
+    return el?.toDataURL(type, quality) ?? null;
 }
 
 /**
- * Convert canvas to blob
+ * Convert canvas contents to a Blob.
  */
 export function toBlob(target, type = 'image/png', quality = 1) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
-
-    return new Promise((resolve) => {
-        canvas?.toBlob(resolve, type, quality);
-    });
+    const el = _resolveCanvas(target);
+    if (!el) return Promise.resolve(null);
+    return new Promise(resolve => el.toBlob(resolve, type, quality));
 }
 
 /**
- * Download canvas as image
+ * Download canvas contents as an image file.
  */
 export function download(target, filename = 'canvas.png', type = 'image/png', quality = 1) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
-
-    if (!canvas) return;
-
+    const el = _resolveCanvas(target);
+    if (!el) return;
     const link = document.createElement('a');
     link.download = filename;
-    link.href = canvas.toDataURL(type, quality);
+    link.href = el.toDataURL(type, quality);
     link.click();
 }
 
 // ─── Drawing helpers ──────────────────────────────────────────────────────────
 
 /**
- * Draw grid
+ * Draw a grid of evenly-spaced lines across the canvas.
  */
 export function drawGrid(ctx, width, height, options = {}) {
-    const {
-        step = 50,
-        color = '#ddd',
-        lineWidth = 1,
-        showAxes = false,
-    } = options;
+    const { step = 50, color = '#ddd', lineWidth = 1, showAxes = false } = options;
 
     ctx.save();
     ctx.strokeStyle = color;
-    ctx.lineWidth = lineWidth;
+    ctx.lineWidth   = lineWidth;
 
-    // Vertical lines
     ctx.beginPath();
     for (let x = 0; x <= width; x += step) {
         ctx.moveTo(x, 0);
         ctx.lineTo(x, height);
     }
-
-    // Horizontal lines
     for (let y = 0; y <= height; y += step) {
         ctx.moveTo(0, y);
         ctx.lineTo(width, y);
     }
-
     ctx.stroke();
 
-    if (showAxes) {
-        drawAxes(ctx, width, height);
-    }
+    if (showAxes) drawAxes(ctx, width, height);
 
     ctx.restore();
 }
 
 /**
- * Draw axes
+ * Draw x and y axes.
  */
 export function drawAxes(ctx, width, height, options = {}) {
-    const {
-        color = '#000',
-        lineWidth = 2,
-    } = options;
+    const { color = '#000', lineWidth = 2 } = options;
 
     ctx.save();
     ctx.strokeStyle = color;
-    ctx.lineWidth = lineWidth;
+    ctx.lineWidth   = lineWidth;
 
     ctx.beginPath();
     ctx.moveTo(0, 0);
@@ -439,46 +412,40 @@ export function drawAxes(ctx, width, height, options = {}) {
 // ─── Chart helpers ────────────────────────────────────────────────────────────
 
 /**
- * Draw bar chart
+ * Draw a bar chart.
  */
 export function barChart(target, data, options = {}) {
     return draw(target, (ctx, size) => {
         const {
-            colors = ['#4CAF50'],
-            labels = [],
-            padding = 40,
+            colors     = ['#4CAF50'],
+            labels     = [],
+            padding    = 40,
             barSpacing = 10,
         } = options;
 
-        const width = size.width - padding * 2;
-        const height = size.height - padding * 2;
+        const width    = size.width  - padding * 2;
+        const height   = size.height - padding * 2;
         const barWidth = (width - (data.length - 1) * barSpacing) / data.length;
-
         const maxValue = Math.max(...data);
-        const scale = height / maxValue;
+        const scale    = height / maxValue;
 
         ctx.save();
         ctx.translate(padding, padding);
 
-        // Draw bars
         data.forEach((value, i) => {
-            const x = i * (barWidth + barSpacing);
-            const barHeight = value * scale;
-            const y = height - barHeight;
+            const x       = i * (barWidth + barSpacing);
+            const barH    = value * scale;
+            const y       = height - barH;
 
             ctx.fillStyle = colors[i % colors.length];
-            ctx.fillRect(x, y, barWidth, barHeight);
+            ctx.fillRect(x, y, barWidth, barH);
 
-            // Draw value on top
-            ctx.fillStyle = '#000';
-            ctx.font = '12px sans-serif';
-            ctx.textAlign = 'center';
+            ctx.fillStyle  = '#000';
+            ctx.font       = '12px sans-serif';
+            ctx.textAlign  = 'center';
             ctx.fillText(value, x + barWidth / 2, y - 5);
 
-            // Draw label
-            if (labels[i]) {
-                ctx.fillText(labels[i], x + barWidth / 2, height + 20);
-            }
+            if (labels[i]) ctx.fillText(labels[i], x + barWidth / 2, height + 20);
         });
 
         ctx.restore();
@@ -486,73 +453,58 @@ export function barChart(target, data, options = {}) {
 }
 
 /**
- * Draw line chart
+ * Draw a line chart from an array of { x, y } points.
  */
 export function lineChart(target, points, options = {}) {
     return draw(target, (ctx, size) => {
         const {
-            color = '#2196F3',
-            fillColor = 'rgba(33, 150, 243, 0.1)',
+            color      = '#2196F3',
+            fillColor  = 'rgba(33, 150, 243, 0.1)',
             pointColor = '#fff',
-            pointSize = 4,
-            padding = 40,
-            smooth = false,
+            pointSize  = 4,
+            padding    = 40,
         } = options;
 
-        const width = size.width - padding * 2;
+        const width  = size.width  - padding * 2;
         const height = size.height - padding * 2;
 
-        // Find min/max
         const xValues = points.map(p => p.x);
         const yValues = points.map(p => p.y);
-        const minX = Math.min(...xValues);
-        const maxX = Math.max(...xValues);
-        const minY = Math.min(...yValues);
-        const maxY = Math.max(...yValues);
+        const minX    = Math.min(...xValues);
+        const maxX    = Math.max(...xValues);
+        const minY    = Math.min(...yValues);
+        const maxY    = Math.max(...yValues);
 
-        // Scale functions
         const scaleX = (x) => padding + ((x - minX) / (maxX - minX || 1)) * width;
         const scaleY = (y) => padding + height - ((y - minY) / (maxY - minY || 1)) * height;
 
         ctx.save();
 
-        // Draw fill
         if (fillColor) {
             ctx.beginPath();
             ctx.moveTo(scaleX(points[0].x), scaleY(points[0].y));
-
-            points.forEach(p => {
-                ctx.lineTo(scaleX(p.x), scaleY(p.y));
-            });
-
+            points.forEach(p => ctx.lineTo(scaleX(p.x), scaleY(p.y)));
             ctx.lineTo(scaleX(points[points.length - 1].x), height + padding);
             ctx.lineTo(scaleX(points[0].x), height + padding);
             ctx.closePath();
-
             ctx.fillStyle = fillColor;
             ctx.fill();
         }
 
-        // Draw line
         ctx.beginPath();
         ctx.moveTo(scaleX(points[0].x), scaleY(points[0].y));
-
-        points.forEach(p => {
-            ctx.lineTo(scaleX(p.x), scaleY(p.y));
-        });
-
+        points.forEach(p => ctx.lineTo(scaleX(p.x), scaleY(p.y)));
         ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
+        ctx.lineWidth   = 2;
         ctx.stroke();
 
-        // Draw points
         points.forEach(p => {
             ctx.beginPath();
             ctx.arc(scaleX(p.x), scaleY(p.y), pointSize, 0, Math.PI * 2);
-            ctx.fillStyle = pointColor;
+            ctx.fillStyle   = pointColor;
             ctx.fill();
             ctx.strokeStyle = color;
-            ctx.lineWidth = 2;
+            ctx.lineWidth   = 2;
             ctx.stroke();
         });
 
@@ -561,15 +513,15 @@ export function lineChart(target, points, options = {}) {
 }
 
 /**
- * Draw pie chart
+ * Draw a pie chart.
  */
 export function pieChart(target, data, options = {}) {
     return draw(target, (ctx, size) => {
         const {
-            colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFE194'],
-            labels = [],
-            radius = Math.min(size.width, size.height) * 0.35,
-            centerX = size.width / 2,
+            colors  = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFE194'],
+            labels  = [],
+            radius  = Math.min(size.width, size.height) * 0.35,
+            centerX = size.width  / 2,
             centerY = size.height / 2,
         } = options;
 
@@ -581,24 +533,21 @@ export function pieChart(target, data, options = {}) {
         data.forEach((value, i) => {
             const sliceAngle = (value / total) * (Math.PI * 2);
 
-            // Draw slice
             ctx.beginPath();
             ctx.moveTo(centerX, centerY);
             ctx.arc(centerX, centerY, radius, startAngle, startAngle + sliceAngle);
             ctx.closePath();
-
             ctx.fillStyle = colors[i % colors.length];
             ctx.fill();
 
-            // Draw label
             if (labels[i]) {
                 const midAngle = startAngle + sliceAngle / 2;
-                const labelX = centerX + Math.cos(midAngle) * radius * 1.5;
-                const labelY = centerY + Math.sin(midAngle) * radius * 1.5;
+                const labelX   = centerX + Math.cos(midAngle) * radius * 1.5;
+                const labelY   = centerY + Math.sin(midAngle) * radius * 1.5;
 
-                ctx.fillStyle = '#000';
-                ctx.font = '12px sans-serif';
-                ctx.textAlign = 'center';
+                ctx.fillStyle    = '#000';
+                ctx.font         = '12px sans-serif';
+                ctx.textAlign    = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(`${labels[i]} (${value})`, labelX, labelY);
             }
@@ -613,57 +562,54 @@ export function pieChart(target, data, options = {}) {
 // ─── Animation ────────────────────────────────────────────────────────────────
 
 /**
- * Animate canvas drawing
+ * Animate canvas drawing using requestAnimationFrame.
+ * The draw callback receives (ctx, size, progress, elapsed).
+ * When duration is Infinity, progress is always 0 — use elapsed instead.
+ *
+ * Returns { stop, restart }.
  */
 export function animate(target, drawFn, duration = Infinity) {
-    const canvas = typeof target === 'string'
-        ? document.querySelector(target)
-        : target;
+    const el = _resolveCanvas(target);
+    if (!el) return { stop: () => {}, restart: () => {} };
 
-    if (!canvas) return { stop: () => {} };
-
-    // Stop existing animation
-    if (_animationInstances.has(canvas)) {
-        const existing = _animationInstances.get(canvas);
-        cancelAnimationFrame(existing.rafId);
+    if (_animationInstances.has(el)) {
+        cancelAnimationFrame(_animationInstances.get(el).rafId);
     }
 
     const startTime = performance.now();
     let rafId;
 
-    const animateFrame = () => {
-        const now = performance.now();
-        const elapsed = now - startTime;
+    const tick = () => {
+        const now      = performance.now();
+        const elapsed  = now - startTime;
         const progress = duration === Infinity ? 0 : Math.min(elapsed / duration, 1);
 
-        draw(canvas, (ctx, size) => {
-            drawFn(ctx, size, progress, elapsed);
-        });
+        draw(el, (ctx, size) => drawFn(ctx, size, progress, elapsed));
 
         if (progress < 1 || duration === Infinity) {
-            rafId = requestAnimationFrame(animateFrame);
+            rafId = requestAnimationFrame(tick);
+        } else {
+            _animationInstances.delete(el);
         }
     };
 
-    rafId = requestAnimationFrame(animateFrame);
-    _animationInstances.set(canvas, { rafId, drawFn, startTime });
+    rafId = requestAnimationFrame(tick);
+    _animationInstances.set(el, { rafId, drawFn, startTime });
 
     return {
         stop: () => {
             cancelAnimationFrame(rafId);
-            _animationInstances.delete(canvas);
+            _animationInstances.delete(el);
         },
         restart: () => {
             cancelAnimationFrame(rafId);
-            const newStart = performance.now();
-            const anim = _animationInstances.get(canvas);
-            if (anim) anim.startTime = newStart;
-            rafId = requestAnimationFrame(animateFrame);
+            rafId = requestAnimationFrame(tick);
+            _animationInstances.set(el, { rafId, drawFn, startTime: performance.now() });
         },
     };
 }
 
-// ─── Export all ───────────────────────────────────────────────────────────────
+// ─── Export ───────────────────────────────────────────────────────────────────
 
 export const canvas = {
     get,
