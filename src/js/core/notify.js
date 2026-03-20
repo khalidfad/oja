@@ -13,6 +13,11 @@
  *   notify.warn('Session expires in 5 minutes');
  *   notify.info('3 hosts updated');
  *
+ *   // Dismiss a specific toast by id
+ *   const id = notify.info('Loading...', { duration: 0 });
+ *   await doWork();
+ *   notify.dismiss(id);
+ *
  *   // With options
  *   notify.success('Deployed', { duration: 5000, dismissible: true });
  *
@@ -224,6 +229,15 @@ export const notify = {
     /** Dismiss all visible toasts immediately. */
     dismissAll() {
         _container?.querySelectorAll('.oja-toast').forEach(_dismiss);
+        return this;
+    },
+
+    // Dismiss a specific toast by the id returned from success/error/warn/info.
+    // Safe to call with a stale id — does nothing if the toast is already gone.
+    dismiss(id) {
+        if (!id || !_container) return this;
+        const toast = _container.querySelector(`#${id}`);
+        if (toast) _dismiss(toast);
         return this;
     },
 
