@@ -1,4 +1,5 @@
 import { find as _find, findAll as _findAll } from './ui.js';
+
 /**
  * oja/_exec.js
  * Execute <script> tags that were injected via innerHTML.
@@ -25,20 +26,24 @@ import { find as _find, findAll as _findAll } from './ui.js';
  * This prevents duplicate-identifier crashes when a developer legitimately
  * declares their own variable with the same name.
  *
- * Used by:
- *   - out.js        (_ComponentOut.render)
- *   - component.js  (mount, add)
+ * ─── Return value ─────────────────────────────────────────────────────────────
+ *
+ * Returns a Promise that resolves once all type="module" scripts in the
+ * container have fired their load event. Classic scripts resolve immediately.
+ * Callers (layout.slot, component.mount) can await this to know the component
+ * script has actually executed — not just been inserted into the DOM.
  *
  * @param {Element} container   — DOM element the HTML was mounted into
- * @param {string}  [sourceUrl] — URL the HTML was fetched from. Used as the
- *                                base for resolving relative import specifiers.
- *                                Falls back to document.baseURI if omitted.
+ * @param {string}  [sourceUrl] — URL the HTML was fetched from
  * @param {object}  [propsData] — Props passed to the component
+ * @returns {Promise<void>}     — resolves after all module scripts have loaded
  */
 export function execScripts(container, sourceUrl, propsData = {}) {
     const base = sourceUrl
         ? new URL(sourceUrl, document.baseURI).href
         : document.baseURI;
+
+    const modulePromises = [];
 
     for (const old of Array.from(container.querySelectorAll('script'))) {
         const next = document.createElement('script');
@@ -131,12 +136,18 @@ export function execScripts(container, sourceUrl, propsData = {}) {
             next.src  = blobUrl;
             next.type = 'module';
 
-            const revoke = function() { URL.revokeObjectURL(blobUrl); };
-            next.addEventListener('load',  revoke, { once: true });
-            next.addEventListener('error', function(e) {
-                console.error('[oja/_exec] module script failed in:', sourceUrl, e);
-                revoke();
-            }, { once: true });
+            // Track load/error so callers can await actual script execution
+            const p = new Promise((resolve) => {
+                const revoke = () => URL.revokeObjectURL(blobUrl);
+                next.addEventListener('load', () => { revoke(); resolve(); }, { once: true });
+                next.addEventListener('error', (e) => {
+                    console.error('[oja/_exec] module script failed in:', sourceUrl, e);
+                    revoke();
+                    resolve(); // resolve not reject — broken component should not block caller
+                }, { once: true });
+            });
+
+            modulePromises.push(p);
 
         } else {
             next.textContent = old.textContent;
@@ -144,6 +155,10 @@ export function execScripts(container, sourceUrl, propsData = {}) {
 
         old.replaceWith(next);
     }
+
+    return modulePromises.length > 0
+        ? Promise.all(modulePromises).then(() => {})
+        : Promise.resolve();
 }
 
 function _abs(specifier, base) {
