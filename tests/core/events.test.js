@@ -1,8 +1,118 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { debounce, throttle, rafThrottle } from '../../src/js/core/events.js';
+import {
+    emit, listen, listenOnce, waitFor,
+    debounce, throttle, rafThrottle,
+} from '../../src/js/core/events.js';
 
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
+
+// ─── emit / listen ────────────────────────────────────────────────────────────
+
+describe('emit() + listen()', () => {
+    it('delivers detail to a registered listener', () => {
+        const fn = vi.fn();
+        const unsub = listen('test:basic', fn);
+        emit('test:basic', { x: 1 });
+        expect(fn).toHaveBeenCalledWith({ x: 1 }, expect.any(CustomEvent));
+        unsub();
+    });
+
+    it('does not call listener after unsub', () => {
+        const fn = vi.fn();
+        const unsub = listen('test:unsub', fn);
+        unsub();
+        emit('test:unsub', {});
+        expect(fn).not.toHaveBeenCalled();
+    });
+
+    it('delivers to multiple independent listeners on the same event', () => {
+        const a = vi.fn();
+        const b = vi.fn();
+        const u1 = listen('test:multi', a);
+        const u2 = listen('test:multi', b);
+        emit('test:multi', { v: 42 });
+        expect(a).toHaveBeenCalledTimes(1);
+        expect(b).toHaveBeenCalledTimes(1);
+        u1(); u2();
+    });
+
+    it('passes an empty object when no detail is provided', () => {
+        const fn = vi.fn();
+        const unsub = listen('test:nodetail', fn);
+        emit('test:nodetail');
+        expect(fn).toHaveBeenCalledWith({}, expect.any(CustomEvent));
+        unsub();
+    });
+
+    it('does not bleed events across different names', () => {
+        const fn = vi.fn();
+        const unsub = listen('test:isolated', fn);
+        emit('test:other', {});
+        expect(fn).not.toHaveBeenCalled();
+        unsub();
+    });
+});
+
+// ─── listenOnce ───────────────────────────────────────────────────────────────
+
+describe('listenOnce()', () => {
+    it('fires exactly once then stops', () => {
+        const fn = vi.fn();
+        listenOnce('test:once', fn);
+        emit('test:once', {});
+        emit('test:once', {});
+        expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns an unsub that prevents the one-time call', () => {
+        const fn = vi.fn();
+        const unsub = listenOnce('test:once-cancel', fn);
+        unsub();
+        emit('test:once-cancel', {});
+        expect(fn).not.toHaveBeenCalled();
+    });
+});
+
+// ─── waitFor ──────────────────────────────────────────────────────────────────
+
+describe('waitFor()', () => {
+    it('resolves with the event detail when the event fires', async () => {
+        const promise = waitFor('test:wait');
+        emit('test:wait', { done: true });
+        const result = await promise;
+        expect(result).toEqual({ done: true });
+    });
+
+    it('rejects after timeout when no event fires', async () => {
+        const promise = waitFor('test:timeout', 100);
+        vi.advanceTimersByTime(100);
+        await expect(promise).rejects.toThrow(/Timeout/);
+    });
+});
+
+// ─── wildcard listener ────────────────────────────────────────────────────────
+
+describe("listen('*')", () => {
+    it('receives all emitted events', () => {
+        const fn = vi.fn();
+        const unsub = listen('*', fn);
+        emit('test:wild-a', { a: 1 });
+        emit('test:wild-b', { b: 2 });
+        expect(fn).toHaveBeenCalledTimes(2);
+        expect(fn).toHaveBeenCalledWith('test:wild-a', { a: 1 });
+        expect(fn).toHaveBeenCalledWith('test:wild-b', { b: 2 });
+        unsub();
+    });
+
+    it('stops receiving after unsub', () => {
+        const fn = vi.fn();
+        const unsub = listen('*', fn);
+        unsub();
+        emit('test:wild-gone', {});
+        expect(fn).not.toHaveBeenCalled();
+    });
+});
 
 // ─── debounce ─────────────────────────────────────────────────────────────────
 

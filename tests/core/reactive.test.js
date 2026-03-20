@@ -6,6 +6,8 @@ beforeEach(() => {
     context.delete('test-counter');
     context.delete('test-user');
     context.delete('test-shared');
+    context.delete('req-key');
+    context.delete('req-pair');
 });
 
 // ─── state ────────────────────────────────────────────────────────────────────
@@ -77,8 +79,8 @@ describe('effect()', () => {
     });
 
     it('does not re-run when an unread state changes', async () => {
-        const [a, setA] = state(0);
-        const [b, setB] = state(0);
+        const [a] = state(0);
+        const [, setB] = state(0);
         const spy = vi.fn();
         effect(() => { a(); spy(); });
         spy.mockClear();
@@ -180,5 +182,37 @@ describe('context()', () => {
         context('test-shared', 'x');
         context.delete('test-shared');
         expect(context.has('test-shared')).toBe(false);
+    });
+});
+
+// ─── context.require ──────────────────────────────────────────────────────────
+
+describe('context.require()', () => {
+    it('throws if the key has not been registered', () => {
+        expect(() => context.require('req-key')).toThrow(/req-key/);
+    });
+
+    it('includes the key name in the error message', () => {
+        expect(() => context.require('req-key')).toThrow('req-key');
+    });
+
+    it('returns the [read, write] pair when the key exists', () => {
+        const [read, write] = context('req-pair', 99);
+        const pair = context.require('req-pair');
+        expect(Array.isArray(pair)).toBe(true);
+        expect(pair[0]).toBe(read);
+        expect(pair[1]).toBe(write);
+    });
+
+    it('returned read reflects current value', () => {
+        const [, set] = context('req-pair', 0);
+        const [read]  = context.require('req-pair');
+        set(55);
+        expect(read()).toBe(55);
+    });
+
+    it('does not throw after the key is registered', () => {
+        context('req-key', 'hello');
+        expect(() => context.require('req-key')).not.toThrow();
     });
 });

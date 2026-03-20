@@ -13,18 +13,18 @@ import {
 
 // Canonical context keys
 export const [files,       setFiles]       = context('files', {});
-export const [activeFile,  setActiveFile]  = context.persist('active_file', 'index.html');
-export const [logs,        setLogs]        = context('logs', []);
-export const[theme,       setTheme]       = context.persist('theme', 'dark');
-export const[layoutMode,  setLayoutMode]  = context.persist('layout_mode', 'horizontal');
-export const[mobileView,  setMobileView]  = context.persist('mobile_view', false);
-export const[autoRefresh, setAutoRefresh] = context.persist('auto_refresh', true);
-export const[panelSplit,  setPanelSplit]  = context.persist('panel_split', 50);
-export const[consoleOpen, setConsoleOpen] = context.persist('console_open', true);
-export const[consoleH,    setConsoleH]    = context.persist('console_height', 180);
-export const[sidebarOpen, setSidebarOpen] = context('sidebar_open', false);
+export const[activeFile,  setActiveFile]  = context.persist('active_file', 'index.html');
+export const[logs,        setLogs]        = context('logs', []);
+export const [theme,       setTheme]       = context.persist('theme', 'dark');
+export const [layoutMode,  setLayoutMode]  = context.persist('layout_mode', 'horizontal');
+export const [mobileView,  setMobileView]  = context.persist('mobile_view', false);
+export const [autoRefresh, setAutoRefresh] = context.persist('auto_refresh', true);
+export const [panelSplit,  setPanelSplit]  = context.persist('panel_split', 50);
+export const [consoleOpen, setConsoleOpen] = context.persist('console_open', true);
+export const [consoleH,    setConsoleH]    = context.persist('console_height', 180);
+export const [sidebarOpen, setSidebarOpen] = context('sidebar_open', false);
 export const [sidebarPin,  setSidebarPin]  = context.persist('sidebar_pin', false);
-export const [savedState,  setSavedState]  = state(null);
+export const[savedState,  setSavedState]  = state(null);
 
 export const isDirty = derived(() => JSON.stringify(files()) !== savedState());
 
@@ -149,6 +149,7 @@ async function loadExample(dir) {
     try {
         await _vfs.clear();
         setLogs([]);
+        history.replaceState(null, '', window.location.pathname + window.location.search);
 
         const base = `./examples/${dir}/`;
         let filesToLoad = ['index.html'];
@@ -191,7 +192,8 @@ async function createNewProject() {
     if (!ok) return;
 
     await _vfs.clear();
-    history.replaceState(null, '', window.location.pathname);
+    // Strip hash so refresh does not restore previous state
+    history.replaceState(null, '', window.location.pathname + window.location.search);
     setLogs([]);
     localStorage.removeItem('pg_expanded');
 
@@ -218,7 +220,7 @@ async function createFile(name) {
     const ext = name.split('.').pop();
     const content = templates[ext] || '';
 
-    const next = { ...files(), [name]: content };
+    const next = { ...files(),[name]: content };
     setFiles(next);
     setActiveFile(name);
     setSavedState(JSON.stringify(next));
@@ -271,6 +273,7 @@ async function importProject(file) {
     try {
         const imported = JSON.parse(await file.text());
         await _vfs.clear();
+        history.replaceState(null, '', window.location.pathname + window.location.search);
         for (const [p, c] of Object.entries(imported)) await _vfs.write(p, c);
         setFiles(imported);
         setActiveFile('index.html');
@@ -281,19 +284,6 @@ async function importProject(file) {
     } catch (err) {
         notify.error('Import failed: ' + err.message);
     }
-}
-
-function encodeToURL() {
-    try {
-        const stateStr = JSON.stringify(files());
-        // Do not pollute the URL if it's just the blank project
-        if (stateStr === BLANK_PROJECT_STR) {
-            history.replaceState({}, '', window.location.pathname);
-            return;
-        }
-        const encoded = btoa(encodeURIComponent(stateStr));
-        history.replaceState({}, '', `#state=${encoded}`);
-    } catch (_) {}
 }
 
 async function loadFromURL() {
@@ -307,6 +297,10 @@ async function loadFromURL() {
         setFiles(imported);
         setActiveFile('index.html');
         setSavedState(JSON.stringify(imported));
+
+        // Strip the hash now that it's loaded to VFS, so refreshing doesn't overwrite new edits
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        notify.success('Project loaded from URL');
     } catch (_) {}
 }
 
@@ -340,14 +334,6 @@ function setupEffects() {
         const t = setTimeout(() => runPreview(), 900);
         return () => clearTimeout(t);
     });
-
-    let urlTimer;
-    effect(() => {
-        files();
-        clearTimeout(urlTimer);
-        urlTimer = setTimeout(encodeToURL, 600);
-        return () => clearTimeout(urlTimer);
-    });
 }
 
 function setupEvents() {
@@ -365,6 +351,20 @@ function setupEvents() {
         const f = document.getElementById('preview-frame');
         if (f?.src) window.open(f.src, '_blank');
     });
+
+    // Explicit Share button copies URL to clipboard instead of polluting URL bar on every keystroke
+    on('[data-action="share"]', 'click', () => {
+        try {
+            const stateStr = JSON.stringify(files());
+            const encoded = btoa(encodeURIComponent(stateStr));
+            const url = window.location.origin + window.location.pathname + window.location.search + '#state=' + encoded;
+            navigator.clipboard.writeText(url);
+            notify.success('Shareable link copied to clipboard!');
+        } catch (err) {
+            notify.error('Project too large to share via URL. Use Export instead.');
+        }
+    });
+
     on('[data-action="export"]',  'click', exportProject);
     on('[data-action="import"]',  'click', () => document.getElementById('import-input')?.click());
     on('#import-input', 'change', e => {
@@ -411,7 +411,7 @@ function setupEvents() {
 
     window.addEventListener('message', e => {
         if (e.data?.type === 'console') {
-            setLogs(prev => [...prev.slice(-199), e.data]);
+            setLogs(prev =>[...prev.slice(-199), e.data]);
         }
     });
 
