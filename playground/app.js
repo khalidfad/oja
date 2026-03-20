@@ -1,504 +1,563 @@
-// Oja Playground — built with Oja
+/**
+ * Oja Playground — orchestrates VFS, Service Worker, layout mounting,
+ * and all global reactive state. Components communicate via context + emit/listen.
+ */
+
 import {
-    state, effect, context,
-    on, find, findAll,
-    Channel, go, VFS
-} from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@v0.0.8/build/oja.core.esm.js';
+    context, state, derived, effect,
+    emit, listen, on, keys,
+    layout, VFS, Out,
+    notify, modal,
+} from '../src/oja.full.js';
 
-const OJA_CDN = 'https://cdn.jsdelivr.net/npm/@agberohq/oja@v0.0.8/build/oja.core.esm.js';
+// Canonical context keys
+export const [files,       setFiles]       = context('files', {});
+export const[activeFile,  setActiveFile]  = context.persist('active_file', 'index.html');
+export const [logs,        setLogs]        = context('logs', []);
+export const [theme,       setTheme]       = context.persist('theme', 'dark');
+export const [layoutMode,  setLayoutMode]  = context.persist('layout_mode', 'horizontal');
+export const [mobileView,  setMobileView]  = context.persist('mobile_view', false);
+export const [autoRefresh, setAutoRefresh] = context.persist('auto_refresh', true);
+export const[panelSplit,  setPanelSplit]  = context.persist('panel_split', 50);
+export const[consoleOpen, setConsoleOpen] = context.persist('console_open', true);
+export const [consoleH,    setConsoleH]    = context.persist('console_height', 180);
+export const[sidebarOpen, setSidebarOpen] = context('sidebar_open', false);
+export const [sidebarPin,  setSidebarPin]  = context.persist('sidebar_pin', false);
+export const [savedState,  setSavedState]  = state(null);
 
-const EXAMPLES = [
-    { name: 'Counter',          desc: 'state + effect basics',                 dir: 'starter'   },
-    { name: 'Todo List',        desc: 'reactive array with add / remove',      dir: 'todo'      },
-    { name: 'Router + Context', desc: 'multi-page SPA with shared state',      dir: 'router'    },
-    { name: 'Guestbook',        desc: 'form.on + context + each()',            dir: 'guestbook' },
-    { name: 'Rhyme Rush AI',    desc: 'Audio pipeline + Channel + go()',       dir: 'game'      },
-    { name: 'Channel Pipeline', desc: 'Go-style async data flow',              dir: 'channel'   },
-];
+export const isDirty = derived(() => JSON.stringify(files()) !== savedState());
 
-const OJA_KEYWORDS = [
-    'state', 'effect', 'context', 'derived', 'batch',
-    'Router', 'Out', 'layout', 'modal', 'notify',
-    'on', 'once', 'emit', 'listen', 'find', 'findAll',
-    'Channel', 'go', 'pipeline', 'VFS', 'Api', 'animate',
-    'component', 'ui'
-];
+let _vfs = null;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+async function init() {
+    showLoading(true);
+    try {
+        await registerSW();
 
-function exampleBase(dir) {
-    const base = new URL(`./examples/${dir}/`, import.meta.url).href;
-    return base.endsWith('/') ? base : base + '/';
-}
+        _vfs = new VFS('oja-playground');
+        await _vfs.ready();
 
-function iconFor(path) {
-    if (path.endsWith('.html')) return '📄';
-    if (path.endsWith('.js'))   return '⚡';
-    if (path.endsWith('.css'))  return '🎨';
-    return '📁';
-}
-
-function escHtml(s) {
-    return String(s).replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'": '&#39;' }[m]));
-}
-
-// ─── App state ────────────────────────────────────────────────────────────────
-
-const [files, setFiles]             = state({});
-const [activeFile, setActiveFile]   = state('index.html');
-const [openTabs, setOpenTabs]       = state([]);
-const [consoleLogs, setConsoleLogs] = state([]);
-const [consoleFilter, setFilter]    = state('all');
-const [consolePaused, setPaused]    = state(false);
-const [theme, setTheme]             = context('playground-theme', 'dark');
-
-let editor      = null;
-let updateTimer = null;
-let blobUrls    = [];
-let _vfs        = null;
-
-// ─── VFS persistence ─────────────────────────────────────────────────────────
-
-async function initVFS() {
-    // VFS is now imported at the top level
-    _vfs = new VFS('oja-playground');
-    await _vfs.ready();
-
-    const existing = await _vfs.ls('/');
-    if (existing.length === 0) {
-        await loadExample(EXAMPLES[0]);
-    } else {
-        const all = await _vfs.getAll();
-        setFiles(all);
-        const paths = Object.keys(all).sort();
-        if (paths.length > 0) {
-            setActiveFile(paths[0]);
-            setOpenTabs(paths.slice(0, 4));
+        const existing = await _vfs.getAll();
+        // If the DB is completely empty on load, boot the starter example
+        if (Object.keys(existing).length === 0) {
+            await loadExample('starter');
+        } else {
+            setFiles(existing);
+            setSavedState(JSON.stringify(existing));
         }
-        addLog('info', `Loaded ${existing.length} files from storage`);
+
+        await layout.apply('#app', './layouts/playground.html');
+        await Promise.all([
+            layout.slot('nav',     Out.c('./components/nav.html')),
+            layout.slot('tabs',    Out.c('./components/tabs.html')),
+            layout.slot('editor',  Out.c('./components/editor.html')),
+            layout.slot('preview', Out.c('./components/preview.html')),
+            layout.slot('console', Out.c('./components/console.html')),
+            layout.slot('sidebar', Out.c('./components/sidebar.html')),
+        ]);
+
+        setupEffects();
+        setupEvents();
+        setupResize();
+        await loadFromURL();
+
+        window.addEventListener('beforeunload', e => {
+            if (isDirty()) { e.preventDefault(); e.returnValue = ''; }
+        });
+
+        await syncToWorker();
+        runPreview();
+
+    } catch (err) {
+        console.error('[playground] init failed', err);
+        notify.error('Failed to start. Check console.');
+    } finally {
+        showLoading(false);
     }
+}
 
-    _vfs.onChange('/', async () => {
-        const all = await _vfs.getAll();
-        setFiles(all);
+function registerSW() {
+    if (!('serviceWorker' in navigator)) return Promise.resolve();
+    return new Promise(async (resolve) => {
+        try {
+            await navigator.serviceWorker.register('./sw.js');
+        } catch (e) {
+            console.warn('[playground] SW registration failed', e);
+            resolve();
+            return;
+        }
+        if (navigator.serviceWorker.controller) {
+            resolve();
+            return;
+        }
+        navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true });
+        setTimeout(resolve, 2000);
     });
 }
 
-function persistFile(path, content) {
-    if (_vfs) _vfs.write(path, content);
-}
+function syncToWorker() {
+    if (!('serviceWorker' in navigator)) return Promise.resolve();
 
-// ─── CodeMirror Editor ────────────────────────────────────────────────────────
+    return new Promise(async resolve => {
+        try {
+            const reg = await navigator.serviceWorker.ready;
+            const sw = reg.active;
+            if (!sw) {
+                resolve();
+                return;
+            }
 
-function setupAutocomplete() {
-    CodeMirror.registerHelper("hint", "javascript", (cm) => {
-        const cursor = cm.getCursor();
-        const line = cm.getLine(cursor.line);
-        const start = cursor.ch;
-        let wordStart = start;
-        while (wordStart > 0 && /[\w$]/.test(line.charAt(wordStart - 1))) wordStart--;
-        const curWord = line.slice(wordStart, start);
+            const onMsg = e => {
+                if (e.data?.type === 'VFS_SYNCED') {
+                    navigator.serviceWorker.removeEventListener('message', onMsg);
+                    resolve();
+                }
+            };
 
-        if (!curWord) return null;
-        const list = OJA_KEYWORDS.filter(w => w.startsWith(curWord));
-        if (!list.length) return null;
+            navigator.serviceWorker.addEventListener('message', onMsg);
+            sw.postMessage({ type: 'SYNC_VFS', files: files() });
 
-        return {
-            list: list,
-            from: CodeMirror.Pos(cursor.line, wordStart),
-            to: CodeMirror.Pos(cursor.line, start)
-        };
-    });
-}
+            setTimeout(() => {
+                navigator.serviceWorker.removeEventListener('message', onMsg);
+                resolve();
+            }, 1000);
 
-function initEditor() {
-    setupAutocomplete();
-    const textarea = find('#editorTextarea');
-
-    editor = CodeMirror.fromTextArea(textarea, {
-        lineNumbers      : true,
-        theme            : 'dracula',
-        mode             : 'htmlmixed',
-        indentUnit       : 2,
-        tabSize          : 2,
-        lineWrapping     : true,
-        styleActiveLine  : true,
-        foldGutter       : true,
-        gutters          : ['CodeMirror-linenumbers', 'CodeMirror-foldgutter'],
-        matchBrackets    : true,
-        autoCloseBrackets: true,
-        autoCloseTags    : true,
-        extraKeys        : { "Ctrl-Space": "autocomplete" }
-    });
-
-    editor.on('inputRead', (cm, change) => {
-        if (change.text[0].match(/[a-z]/i)) {
-            cm.showHint({ completeSingle: false });
+        } catch (e) {
+            resolve();
         }
     });
-
-    editor.on('change', () => {
-        const path = activeFile();
-        if (!path) return;
-        const updated = { ...files() };
-        updated[path] = editor.getValue();
-        setFiles(updated);
-        persistFile(path, editor.getValue());
-        clearTimeout(updateTimer);
-        updateTimer = setTimeout(runPreview, 400);
-    });
-
-    editor.on('cursorActivity', () => {
-        const c = editor.getCursor();
-        find('#cursorPosition').textContent = `Ln ${c.line + 1}, Col ${c.ch + 1}`;
-    });
-
-    syncEditorContent();
 }
 
-function syncEditorContent() {
-    if (!editor) return;
-    const path    = activeFile();
-    const content = files()[path] || '';
-    if (editor.getValue() !== content) {
-        editor.setValue(content);
-    }
-    editor.setOption('mode',
-        path.endsWith('.js')  ? 'javascript' :
-            path.endsWith('.css') ? 'css'        : 'htmlmixed'
-    );
-    find('#fileType').textContent = path.split('.').pop().toUpperCase();
-}
-
-// ─── Declarative UI Effects ──────────────────────────────────────────────────
-
-effect(() => {
-    const fileMap = files();
-    const active  = activeFile();
-    const list    = find('#fileTree');
-    const paths   = Object.keys(fileMap).sort();
-
-    list.innerHTML = paths.map(p => `
-        <div class="file-item ${p === active ? 'active' : ''}" data-path="${escHtml(p)}">
-            <span class="file-icon">${iconFor(p)}</span>
-            <span class="file-name">${escHtml(p)}</span>
-            <span class="file-del" data-path="${escHtml(p)}">✕</span>
-        </div>
-    `).join('');
-
-    find('#fileStats').textContent = `${paths.length} file${paths.length === 1 ? '' : 's'}`;
-});
-
-effect(() => {
-    const tabs   = openTabs();
-    const active = activeFile();
-    const bar    = find('#tabBar');
-
-    bar.innerHTML = tabs.map(p => `
-        <div class="tab ${p === active ? 'active' : ''}" data-path="${escHtml(p)}">
-            <span>${escHtml(p.split('/').pop())}</span>
-            <span class="tab-close" data-path="${escHtml(p)}">✕</span>
-        </div>
-    `).join('');
-});
-
-effect(() => {
-    const logs     = consoleLogs();
-    const filter   = consoleFilter();
-    const panel    = find('#consoleLogs');
-    const filtered = filter === 'all' ? logs : logs.filter(l => l.level === filter);
-
-    if (filtered.length === 0) {
-        panel.innerHTML = '<div class="console-empty">✓ No logs — run your code to see output</div>';
+async function runPreview() {
+    if (!files()['index.html']) {
+        notify.warn('No index.html to preview.');
         return;
     }
-
-    panel.innerHTML = filtered.map(l => `
-        <div class="log-line">
-            <span class="log-time">${l.time}</span>
-            <span class="log-level ${l.level}">${l.level}</span>
-            <span class="log-message">${escHtml(l.message)}</span>
-        </div>
-    `).join('');
-
-    panel.scrollTop = panel.scrollHeight;
-});
-
-effect(syncEditorContent);
-
-// ─── File Operations ──────────────────────────────────────────────────────────
-
-function openFile(path) {
-    if (!files()[path]) return;
-    if (!openTabs().includes(path)) setOpenTabs([...openTabs(), path]);
-    setActiveFile(path);
+    await syncToWorker();
+    emit('preview:run', { url: `./preview-zone/index.html?t=${Date.now()}` });
+    setSavedState(JSON.stringify(files()));
 }
 
-function closeTab(path) {
-    const remaining = openTabs().filter(p => p !== path);
-    setOpenTabs(remaining);
-    if (activeFile() === path) {
-        setActiveFile(remaining[0] || null);
+async function loadExample(dir) {
+    try {
+        await _vfs.clear();
+        setLogs([]);
+
+        const base = `./examples/${dir}/`;
+        let filesToLoad = ['index.html'];
+
+        try {
+            const cfgRes = await fetch(base + 'oja.config.json');
+            if (cfgRes.ok) {
+                const cfg = await cfgRes.json();
+                filesToLoad = cfg.vfs?.files || filesToLoad;
+            }
+        } catch (_) {}
+
+        const newFiles = {};
+        await Promise.all(filesToLoad.map(async path => {
+            try {
+                const res = await fetch(base + path);
+                if (res.ok) {
+                    newFiles[path] = await res.text();
+                    await _vfs.write(path, newFiles[path]);
+                }
+            } catch (_) {}
+        }));
+
+        setFiles(newFiles);
+        setActiveFile('index.html');
+        setSavedState(JSON.stringify(newFiles));
+
+        await syncToWorker();
+        runPreview();
+        notify.success(`Loaded "${dir}"`);
+    } catch (err) {
+        notify.error(`Failed to load "${dir}"`);
+        console.error(err);
     }
 }
 
-function deleteFile(path) {
-    if (path === 'index.html') {
-        addLog('error', 'Cannot delete index.html — it is the entry point');
-        return;
-    }
-    if (!confirm(`Delete ${path}?`)) return;
-    const updated = { ...files() };
-    delete updated[path];
-    setFiles(updated);
-    if (_vfs) _vfs.rm(path);
-    closeTab(path);
-    runPreview();
-}
-
-function createFile(path, content = '') {
-    path = path.trim();
-    if (!path) return;
-    if (files()[path] !== undefined) {
-        addLog('error', `File "${path}" already exists`);
-        return;
-    }
-    const body    = content || (path.endsWith('.html') ? '<div></div>' : '');
-    const updated = { ...files(), [path]: body };
-    setFiles(updated);
-    persistFile(path, body);
-    setOpenTabs([...openTabs(), path]);
-    setActiveFile(path);
-    runPreview();
-}
-
-// ─── Run & Preview ────────────────────────────────────────────────────────────
-
-function runPreview() {
-    blobUrls.forEach(u => URL.revokeObjectURL(u));
-    blobUrls = [];
-
-    const indexContent = files()['index.html'];
-    if (!indexContent) {
-        find('#previewFrame').srcdoc = `<body><p>No index.html found</p></body>`;
-        return;
-    }
-
-    const blobMap = {};
-    Object.entries(files()).forEach(([path, content]) => {
-        const mime = path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html';
-        const blob = new Blob([content], { type: mime });
-        const url  = URL.createObjectURL(blob);
-        blobMap[path] = url;
-        blobUrls.push(url);
-    });
-
-    let html = indexContent;
-
-    html = html.replace(/(import\s+(?:[\w*{},\s]+from\s+)?['"])([^'"]+)(['"])/g, (m, pre, spec, post) => {
-        if (spec.startsWith('http') || spec.startsWith('blob:')) return m;
-        const resolved = spec.replace(/^\.\//, '');
-        return blobMap[resolved] ? pre + blobMap[resolved] + post : m;
-    });
-
-    html = html.replace(/(src|href)=["']([^"']+)["']/g, (m, attr, val) => {
-        if (val.startsWith('http') || val.startsWith('blob:') || val.startsWith('#') || val.startsWith('data:')) return m;
-        return blobMap[val] ? `${attr}="${blobMap[val]}"` : m;
-    });
-
-    const bridge = `<script>
-        (function() {
-            ['log','warn','error','info'].forEach(m => {
-                const orig = console[m];
-                console[m] = function(...args) {
-                    orig.apply(console, args);
-                    window.parent.postMessage({ type: 'console', level: m,
-                        args: args.map(a => { try { return typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a); } catch { return String(a); } })
-                    }, '*');
-                };
-            });
-        })();
-    <\/script>`;
-
-    html = html.replace('</head>', bridge + '</head>');
-    find('#previewFrame').srcdoc = html;
-    find('#previewStatus').innerHTML = '● running';
-}
-
-function addLog(level, message) {
-    if (consolePaused()) return;
-    setConsoleLogs([...consoleLogs(), {
-        id     : Date.now() + Math.random(),
-        time   : new Date().toLocaleTimeString([], { hour12: false }),
-        level,
-        message: String(message),
-    }].slice(-500));
-}
-
-// ─── Example Loading ──────────────────────────────────────────────────────────
-
-async function loadExample(ex) {
-    if (!_vfs) return;
-    addLog('info', `Loading example: ${ex.name}...`);
+// Wipes the VFS, resets all state, and loads a blank starter project.
+// Awaits syncToWorker before running preview so the SW has the new file before the iframe fetches it.
+async function resetWorkspace() {
+    const ok = await modal.confirm('Delete everything and start a blank project?');
+    if (!ok) return;
 
     await _vfs.clear();
-    const base = exampleBase(ex.dir);
+    history.replaceState(null, '', window.location.pathname);
+    setLogs([]);
+    localStorage.removeItem('pg_expanded');
 
+    const blankFile = {
+        'index.html': `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Blank Project</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.min.css">
+    <style>body { padding: 20px; font-family: system-ui; background: #0f0f0f; color: #e8e8e8; }</style>
+</head>
+<body>
+    <h1>New Project</h1>
+    <p>Start coding...</p>
+</body>
+</html>`
+    };
+
+    await _vfs.write('index.html', blankFile['index.html']);
+    setFiles(blankFile);
+    setActiveFile('index.html');
+    setSavedState(JSON.stringify(blankFile));
+
+    await syncToWorker();
+    runPreview();
+    notify.success('Database deleted. Starting fresh.');
+}
+
+async function createFile(name) {
+    if (!name?.trim()) return;
+    name = name.trim();
+    if (files()[name]) { notify.warn(`"${name}" already exists`); return; }
+
+    const templates = {
+        js:   `// ${name}\n`,
+        css:  `/* ${name} */\n`,
+        html: `<!-- ${name} -->\n<div>\n\n</div>\n`,
+    };
+    const ext = name.split('.').pop();
+    const content = templates[ext] || '';
+
+    const next = { ...files(), [name]: content };
+    setFiles(next);
+    setActiveFile(name);
+    setSavedState(JSON.stringify(next));
+    await _vfs.write(name, content);
+    syncToWorker();
+}
+
+async function deleteFile(path) {
+    if (path === 'index.html') { notify.warn('index.html is required.'); return; }
+    const ok = await modal.confirm(`Delete "${path}"?`);
+    if (!ok) return;
+    const next = { ...files() };
+    delete next[path];
+    setFiles(next);
+    if (activeFile() === path) setActiveFile('index.html');
+    setSavedState(JSON.stringify(next));
+    await _vfs.rm(path);
+    syncToWorker();
+    notify.success(`Deleted "${path}"`);
+}
+
+async function renameFile(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    if (files()[newPath]) { notify.warn(`"${newPath}" already exists`); return; }
+    const content = files()[oldPath];
+    const next = { ...files() };
+    delete next[oldPath];
+    next[newPath] = content;
+    setFiles(next);
+    if (activeFile() === oldPath) setActiveFile(newPath);
+    setSavedState(JSON.stringify(next));
+    await _vfs.write(newPath, content);
+    await _vfs.rm(oldPath);
+    syncToWorker();
+}
+
+async function exportProject() {
+    const data = JSON.stringify(await _vfs.getAll(), null, 2);
+    const a = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(new Blob([data], { type: 'application/json' })),
+        download: `oja-project-${Date.now()}.json`,
+    });
+    a.click();
+    URL.revokeObjectURL(a.href);
+    notify.success('Exported');
+}
+
+async function importProject(file) {
+    if (!file) return;
     try {
-        const result = await _vfs.mount(base, { force: true });
-        const all = await _vfs.getAll();
-        const paths = Object.keys(all).sort();
-
-        setFiles(all);
-        setOpenTabs(paths.slice(0, 4));
-        setActiveFile(paths.includes('index.html') ? 'index.html' : paths[0]);
-
+        const imported = JSON.parse(await file.text());
+        await _vfs.clear();
+        for (const [p, c] of Object.entries(imported)) await _vfs.write(p, c);
+        setFiles(imported);
+        setActiveFile('index.html');
+        setSavedState(JSON.stringify(imported));
+        await syncToWorker();
         runPreview();
-        addLog('info', `Successfully loaded ${ex.name}`);
-    } catch (e) {
-        addLog('error', `Failed to load example: ${e.message}`);
+        notify.success(`Imported ${Object.keys(imported).length} files`);
+    } catch (err) {
+        notify.error('Import failed: ' + err.message);
     }
 }
 
-// ─── UI Interaction (Oja `on` wiring) ─────────────────────────────────────────
+function encodeToURL() {
+    try {
+        const encoded = btoa(encodeURIComponent(JSON.stringify(files())));
+        history.replaceState({}, '', `#state=${encoded}`);
+    } catch (_) {}
+}
 
-function setupInteraction() {
-    on('#runBtn', 'click', runPreview);
-    on('#themeToggleBtn', 'click', () => {
-        const next = theme() === 'dark' ? 'light' : 'dark';
-        setTheme(next);
-        document.documentElement.setAttribute('data-theme', next);
-        editor.setOption('theme', next === 'dark' ? 'dracula' : 'default');
-        localStorage.setItem('oja-playground-theme', next);
+async function loadFromURL() {
+    const params = new URLSearchParams(location.hash.slice(1));
+    const encoded = params.get('state');
+    if (!encoded) return;
+    try {
+        const imported = JSON.parse(decodeURIComponent(atob(encoded)));
+        await _vfs.clear();
+        for (const [p, c] of Object.entries(imported)) await _vfs.write(p, c);
+        setFiles(imported);
+        setActiveFile('index.html');
+        setSavedState(JSON.stringify(imported));
+    } catch (_) {}
+}
+
+function setupEffects() {
+    effect(() => { document.body.dataset.theme = theme(); });
+
+    effect(() => {
+        document.querySelector('.pg-layout')?.setAttribute('data-layout', layoutMode());
     });
 
-    on('#fileTree', 'click', (e) => {
-        const item = e.target.closest('.file-item');
-        if (!item) return;
-        if (e.target.classList.contains('file-del')) {
-            deleteFile(item.dataset.path);
-        } else {
-            openFile(item.dataset.path);
+    effect(() => {
+        const sidebar = document.querySelector('.pg-sidebar');
+        const main    = document.querySelector('.pg-main');
+        if (!sidebar || !main) return;
+        const open   = sidebarOpen() || sidebarPin();
+        sidebar.classList.toggle('open',   open);
+        sidebar.classList.toggle('pinned', sidebarPin());
+        main.classList.toggle('sidebar-pinned', sidebarPin());
+    });
+
+    effect(() => {
+        const body = document.querySelector('.console-body');
+        if (body) {
+            body.style.height = consoleH() + 'px';
+            body.style.maxHeight = 'none';
         }
     });
 
-    on('#addFileSidebar', 'click', () => find('#newFileDialog').classList.add('open'));
-    on('#newFileBtn', 'click', () => find('#newFileDialog').classList.add('open'));
+    effect(() => {
+        if (!autoRefresh() || !isDirty()) return;
+        const t = setTimeout(() => runPreview(), 900);
+        return () => clearTimeout(t);
+    });
 
-    on('#tabBar', 'click', (e) => {
-        const tab = e.target.closest('.tab');
-        if (!tab) return;
-        if (e.target.classList.contains('tab-close')) {
-            closeTab(tab.dataset.path);
-        } else {
-            openFile(tab.dataset.path);
+    let urlTimer;
+    effect(() => {
+        files();
+        clearTimeout(urlTimer);
+        urlTimer = setTimeout(encodeToURL, 600);
+        return () => clearTimeout(urlTimer);
+    });
+}
+
+function setupEvents() {
+    on('[data-action="run"]',            'click', () => runPreview());
+    listen('preview:force',              () => runPreview());
+    on('[data-action="reset"]',          'click', () => resetWorkspace());
+    on('[data-action="new-file"]',       'click', () => openNewFileModal());
+    on('[data-action="examples"]',       'click', () => openExamplesModal());
+    on('[data-action="toggle-theme"]',   'click', () => setTheme(t => t === 'dark' ? 'light' : 'dark'));
+    on('[data-action="toggle-layout"]',  'click', () => setLayoutMode(m => m === 'horizontal' ? 'vertical' : 'horizontal'));
+    on('[data-action="toggle-mobile"]',  'click', () => setMobileView(v => !v));
+    on('[data-action="toggle-sidebar"]', 'click', () => setSidebarOpen(v => !v));
+    on('[data-action="pin-sidebar"]',    'click', () => setSidebarPin(v => !v));
+    on('[data-action="pop-out"]',        'click', () => {
+        const f = document.getElementById('preview-frame');
+        if (f?.src) window.open(f.src, '_blank');
+    });
+    on('[data-action="export"]',  'click', exportProject);
+    on('[data-action="import"]',  'click', () => document.getElementById('import-input')?.click());
+    on('#import-input', 'change', e => {
+        if (e.target.files?.[0]) importProject(e.target.files[0]);
+        e.target.value = '';
+    });
+
+    on('[data-action="modal-close"]',  'click', () => modal.close());
+    on('[data-action="create-file"]',  'click', () => {
+        const val = document.getElementById('new-file-input')?.value?.trim();
+        if (val) createFile(val);
+        modal.close();
+    });
+    on('[data-action="load-example"]', 'click', (e, el) => {
+        loadExample(el.dataset.ex);
+        modal.close();
+    });
+
+    listen('vfs:save', async ({ path, content }) => {
+        await _vfs.write(path, content);
+        syncToWorker();
+    });
+    listen('file:delete', ({ path }) => deleteFile(path));
+    listen('file:rename', ({ oldPath, newPath }) => renameFile(oldPath, newPath));
+    listen('file:rename-prompt', ({ path }) => openRenameModal(path));
+
+    window.addEventListener('message', e => {
+        if (e.data?.type === 'console') {
+            setLogs(prev => [...prev.slice(-199), e.data]);
         }
     });
 
-    on('#cancelDialog', 'click', () => find('#newFileDialog').classList.remove('open'));
-    on('#confirmDialog', 'click', () => {
-        const input = find('#newFileName');
-        if (input.value.trim()) {
-            createFile(input.value.trim());
-            find('#newFileDialog').classList.remove('open');
-            input.value = '';
+    document.addEventListener('click', e => {
+        if (!sidebarPin() && sidebarOpen()
+            && !e.target.closest('.pg-sidebar')
+            && !e.target.closest('[data-action="toggle-sidebar"]')) {
+            setSidebarOpen(false);
         }
     });
 
-    on('#examplesBtn', 'click', () => {
-        const list = find('#exampleList');
-        list.innerHTML = EXAMPLES.map(ex => `
-            <div class="example-card" data-dir="${ex.dir}">
-                <div class="example-name">${escHtml(ex.name)}</div>
-                <div class="example-desc">${escHtml(ex.desc)}</div>
+    keys({
+        'ctrl+enter': () => runPreview(),
+        'ctrl+s':     e => { e.preventDefault(); runPreview(); },
+        'ctrl+n':     e => { e.preventDefault(); openNewFileModal(); },
+        'ctrl+e':     e => { e.preventDefault(); exportProject(); },
+        'ctrl+i':     e => { e.preventDefault(); document.getElementById('import-input')?.click(); },
+        'ctrl+\\':    () => setTheme(t => t === 'dark' ? 'light' : 'dark'),
+        'ctrl+b':     () => setSidebarOpen(v => !v),
+        'escape':     () => modal.close(),
+        'f5':         e => { e.preventDefault(); runPreview(); },
+    });
+}
+
+function setupResize() {
+    makeResizable(
+        document.getElementById('split-handle'),
+        pct => {
+            setPanelSplit(pct);
+            document.querySelector('.editor-pane').style.flexBasis = pct + '%';
+            document.querySelector('.preview-pane').style.flexBasis = (100 - pct) + '%';
+        },
+        'horizontal'
+    );
+
+    makeResizable(
+        document.getElementById('console-resize'),
+        px => {
+            const clamped = Math.max(60, Math.min(500, px));
+            setConsoleH(clamped);
+        },
+        'console'
+    );
+}
+
+function makeResizable(handle, onResize, mode) {
+    if (!handle) return;
+    let active = false;
+
+    handle.addEventListener('pointerdown', e => {
+        active = true;
+        handle.setPointerCapture(e.pointerId);
+        handle.classList.add('dragging');
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = mode === 'console' ? 'ns-resize' : 'row-resize';
+    });
+
+    handle.addEventListener('pointermove', e => {
+        if (!active) return;
+        if (mode === 'horizontal') {
+            const rect = document.querySelector('.editor-preview').getBoundingClientRect();
+            const pct  = Math.max(20, Math.min(80, ((e.clientX - rect.left) / rect.width) * 100));
+            onResize(Math.round(pct));
+        } else if (mode === 'console') {
+            const px = window.innerHeight - e.clientY - 28;
+            onResize(Math.round(px));
+        }
+    });
+
+    handle.addEventListener('pointerup', () => {
+        active = false;
+        handle.classList.remove('dragging');
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+    });
+}
+
+function openNewFileModal() {
+    modal.open('pg-modal', {
+        body: Out.html(`
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <input id="new-file-input" class="modal-input" placeholder="e.g. components/card.html" autofocus>
+                <div class="modal-hint">
+                    <span class="hint-tag">.html</span> component &nbsp;
+                    <span class="hint-tag">.js</span> module &nbsp;
+                    <span class="hint-tag">.css</span> styles
+                </div>
+                <button class="btn-primary" data-action="create-file">Create</button>
             </div>
-        `).join('');
-        find('#examplesDialog').classList.add('open');
+        `)
     });
+    setTimeout(() => document.getElementById('new-file-input')?.focus(), 50);
+}
 
-    on('#exampleList', 'click', (e) => {
-        const card = e.target.closest('.example-card');
-        if (!card) return;
-        const ex = EXAMPLES.find(x => x.dir === card.dataset.dir);
-        if (ex) loadExample(ex);
-        find('#examplesDialog').classList.remove('open');
-    });
-
-    on('#closeExamples', 'click', () => find('#examplesDialog').classList.remove('open'));
-
-    on('#clearConsoleBtn', 'click', () => setConsoleLogs([]));
-    on('#pauseConsoleBtn', 'click', () => {
-        setPaused(!consolePaused());
-        find('#pauseConsoleBtn').textContent = consolePaused() ? '▶' : '⏸';
-    });
-
-    on('.console-filter', 'click', (e) => {
-        const chip = e.target.closest('.filter-chip');
-        if (!chip) return;
-        findAll('.filter-chip').forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
-        setFilter(chip.dataset.level);
-    });
-
-    on('#collapseSidebar', 'click', () => {
-        find('#sidebar').classList.toggle('collapsed');
-        setTimeout(() => editor.refresh(), 310);
-    });
-
-    on('#collapseConsole', 'click', () => find('#consoleArea').classList.toggle('collapsed'));
-    on('#collapsePreview', 'click', () => find('#previewArea').classList.toggle('collapsed'));
-    on('#toggleMobile', 'click', () => find('#previewFrame').classList.toggle('mobile-view'));
-    on('#toggleFull', 'click', () => {
-        const frame = find('#previewFrame');
-        if (frame.requestFullscreen) frame.requestFullscreen();
-    });
-
-    on(window, 'message', (e) => {
-        if (e.data?.type === 'console') addLog(e.data.level, e.data.args.join(' '));
-    });
-
-    on(document, 'keydown', e => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runPreview(); }
-        if ((e.ctrlKey || e.metaKey) && e.key === 'n')     { e.preventDefault(); find('#newFileDialog').classList.add('open'); }
+function openExamplesModal() {
+    const EXAMPLES =[
+        { id: 'starter',   label: 'Starter',   sub: 'state · effect · component' },
+        { id: 'todo',      label: 'Todo',       sub: 'list · reactivity' },
+        { id: 'router',    label: 'Router',     sub: 'multi-page SPA' },
+        { id: 'guestbook', label: 'Guestbook',  sub: 'form · validation' },
+        { id: 'channel',   label: 'Channel',    sub: 'async pipeline' },
+        { id: 'game',      label: 'Game',       sub: 'Rhyme Rush' },
+        { id: 'twitter',   label: 'Twitter',    sub: 'full SPA · 17 files' },
+    ];
+    modal.open('pg-modal', {
+        body: Out.html(`
+            <div class="example-grid">
+                ${EXAMPLES.map(e => `
+                    <button class="example-card" data-action="load-example" data-ex="${e.id}">
+                        <span class="example-label">${e.label}</span>
+                        <span class="example-sub">${e.sub}</span>
+                    </button>
+                `).join('')}
+            </div>
+        `)
     });
 }
 
-function initPanelResize() {
-    const makeDraggable = (handle, target, axis) => {
-        on(handle, 'mousedown', (e) => {
-            e.preventDefault();
-            const startPos = axis === 'x' ? e.clientX : e.clientY;
-            const startSize = axis === 'x' ? target.offsetWidth : target.offsetHeight;
-            const onMove = (moveEvt) => {
-                const currentPos = axis === 'x' ? moveEvt.clientX : moveEvt.clientY;
-                const delta = currentPos - startPos;
-                const newSize = axis === 'x' ? startSize + delta : startSize - delta;
-                if (axis === 'x') target.style.width = Math.max(40, newSize) + 'px';
-                else find('#bottomSplit').style.height = Math.max(30, newSize) + 'px';
-                if (editor) editor.refresh();
-            };
-            const onUp = () => {
-                document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup', onUp);
-            };
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', onUp);
+function openRenameModal(path) {
+    const name = path.split('/').pop();
+    modal.open('pg-modal', {
+        body: Out.html(`
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <label style="font-size:11px;color:var(--text-muted)">Rename "${name}"</label>
+                <input id="rename-input" class="modal-input" value="${name}" autofocus>
+                <button class="btn-primary" id="do-rename">Rename</button>
+            </div>
+        `)
+    });
+    setTimeout(() => {
+        const input = document.getElementById('rename-input');
+        input?.focus();
+        input?.select();
+        document.getElementById('do-rename')?.addEventListener('click', () => {
+            const newName = input?.value?.trim();
+            if (newName && newName !== name) {
+                const parts = path.split('/');
+                parts.pop();
+                const newPath = parts.length ? parts.join('/') + '/' + newName : newName;
+                renameFile(path, newPath);
+            }
+            modal.close();
         });
-    };
-    makeDraggable(find('.resize-handle-x'), find('#sidebar'), 'x');
-    makeDraggable(find('.resize-handle-y'), find('#bottomSplit'), 'y');
+    }, 50);
 }
 
-function init() {
-    const savedTheme = localStorage.getItem('oja-playground-theme') || 'dark';
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    setTheme(savedTheme);
+let _loadEl = null;
 
-    initEditor();
-    setupInteraction();
-    initPanelResize();
-
-    initVFS().catch(e => addLog('warn', 'VFS unavailable: ' + e.message));
+function showLoading(show) {
+    if (show && !_loadEl) {
+        _loadEl = Object.assign(document.createElement('div'), { className: 'pg-loading' });
+        _loadEl.innerHTML = '<div class="pg-spinner"></div>';
+        document.body.appendChild(_loadEl);
+    } else if (!show && _loadEl) {
+        _loadEl.remove();
+        _loadEl = null;
+    }
 }
 
-init();
+init().catch(err => {
+    console.error('[playground] fatal', err);
+    notify.error('Fatal error — check console');
+});
