@@ -1,9 +1,20 @@
 > WARNING: This project is under active development.
 
 
-# Oja
+<p align="center">
+  <img src="assets/oja_icon.png" width="300" alt="Agbero Logo">
+</p>
+
+
+
+
+<p align="left">
+  <img src="assets/oja_name.png" width="70" alt="Agbero Logo">
+</p>
 
 > *Oja* (Yoruba: *marketplace*) — a minimal, zero-build JavaScript framework for building multi-app SPAs.
+
+
 
 No compiler. No virtual DOM. No node_modules. Drop files in, open a browser, it works.
 
@@ -44,9 +55,44 @@ No package manager required. Two ways to use Oja:
 
 ---
 
-### Option 1 — Single file (recommended for production)
+### Option 1 — CDN (recommended)
 
-Build once, include one file in every app.
+Include Oja directly from jsDelivr — no install, no build step.
+
+```html
+<!-- CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.min.css">
+
+<!-- ESM — recommended for modern apps -->
+<script type="module">
+    import { Router, Out, state, effect } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+</script>
+
+<!-- IIFE — Oja available as window.Oja -->
+<script src="https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.min.js"></script>
+```
+
+Pin to a specific version in production:
+
+```html
+<script type="module">
+    import { Router, Out, state, effect } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@0.0.6/build/oja.core.esm.js';
+</script>
+```
+
+For extensions (WebSocket, Worker, WASM, Canvas, etc.) use the full build:
+
+```html
+<script type="module">
+    import { OjaSocket, OjaWorker, Channel } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js';
+</script>
+```
+
+---
+
+### Option 2 — Self-hosted (build from source)
+
+Clone the repo and build once. Use this when you need to bundle Oja into your own build pipeline or want to ship without a CDN dependency.
 
 **Requirements** (one-time setup):
 ```bash
@@ -55,7 +101,7 @@ npm install --save-dev esbuild clean-css-cli
 
 **Build:**
 ```bash
-make          # builds everything → build/oja.min.js + build/oja.min.css
+make          # builds everything → build/oja.core.min.js + build/oja.min.css
 make watch    # rebuild on save during development
 make check    # show output sizes
 make clean    # remove build/
@@ -64,49 +110,37 @@ make clean    # remove build/
 **Include in your app:**
 ```html
 <link rel="stylesheet" href="../oja/build/oja.min.css">
-<script src="../oja/build/oja.min.js"></script>
-<!-- Oja is now available as window.Oja -->
-<script type="module" src="app.js"></script>
+
+<!-- ESM -->
+<script type="module">
+    import { Router, Out, state, effect } from '../oja/build/oja.core.esm.js';
+</script>
+
+<!-- IIFE — Oja available as window.Oja -->
+<script src="../oja/build/oja.core.min.js"></script>
 ```
 
 ```js
-// app.js — destructure from the global
+// IIFE — destructure from the global
 const { Router, Out, auth, notify, component,
-    state, effect, OjaWorker, OjaWasm, Channel, go } = Oja;
-```
-
-Or use the ESM build for modern apps:
-```html
-<script type="module">
-    import { Router, Out, auth } from '../oja/build/oja.esm.js';
-</script>
+    state, effect, Channel, go } = Oja;
 ```
 
 ---
 
-### Option 2 — Direct imports (zero build, development friendly)
+### Option 3 — Direct source imports (zero build, development friendly)
 
-Copy the `src/` folder and import via the barrel entry point. No build step ever.
+Copy the `src/` folder and import directly. No build step ever. This is how the example apps work — open `example/hello/index.html` or `example/twitter/index.html` in a browser and they run immediately.
 
 ```
 my-project/
     index.html
-    js/
-        app.js
-         oja.core.min.js
-    css/
-        styles.css
-        oja.min.css
+    app.js
+    oja/
+        src/          ← copied from this repo
     pages/
     components/
-    layout/
-    assets/
-```
-
-```html
-<!-- index.html -->
-<link rel="stylesheet" href="../oja/src/css/oja.css">
-<script type="module" src="app.js"></script>
+    layouts/
 ```
 
 ```js
@@ -117,8 +151,6 @@ import { Router, Out, auth, notify, component } from '../oja/src/oja.js';
 import { OjaSSE, OjaWorker, Channel } from '../oja/src/oja.full.js';
 ```
 
-This is how the example apps work — open `example/dashboard/index.html` or `example/twitter/index.html` in a browser and they run with no build step.
-
 ---
 
 ## Core concepts
@@ -128,7 +160,7 @@ This is how the example apps work — open `example/dashboard/index.html` or `ex
 `Out` is how Oja produces every piece of visible output. There are no raw HTML strings, no ad-hoc `innerHTML`, no inconsistent rendering paths. One primitive, composable everywhere.
 
 ```js
-import { Out } from '../oja/src/oja.js';
+import { Out } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 // Render a plain HTML string
 Out.html('<div class="error">Something went wrong</div>')
@@ -231,7 +263,7 @@ When Oja mounts a component, the inline script automatically receives `container
 ### 4. Reactive state — fine-grained, no virtual DOM
 
 ```js
-import { state, effect, derived, batch, context } from '../oja/src/oja.js';
+import { state, effect, derived, batch, context } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 const [metrics, setMetrics] = state(null);
 const [history, setHistory] = state([]);
@@ -257,7 +289,7 @@ export const [isOnline, setOnline] = context('isOnline', true);
 ### 5. Router — Go-style middleware and groups
 
 ```js
-import { Router, Out, auth } from '../oja/src/oja.js';
+import { Router, Out, auth } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 const router = new Router({
     mode    : 'hash',
@@ -335,7 +367,7 @@ await auth.session.start(responseToken);
 ### 7. Layout — persistent shell with slot injection
 
 ```js
-import { layout } from '../oja/src/oja.js';
+import { layout } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 // Define a persistent shell — survives navigation, renders once
 const shell = layout('components/nav.html', {
@@ -421,7 +453,7 @@ Oja supports two styles — mix freely:
 Register custom filters:
 
 ```js
-import { template } from '../oja/src/oja.js';
+import { template } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 template.filter('slug', s => s.toLowerCase().replace(/\s+/g, '-'));
 ```
@@ -433,7 +465,7 @@ template.filter('slug', s => s.toLowerCase().replace(/\s+/g, '-'));
 ### Store — persistent state with cascade
 
 ```js
-import { Store } from '../oja/src/oja.js';
+import { Store } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 const store  = new Store('myapp');                        // session storage
 const secure = new Store('myapp', { encrypt: true });     // encrypted
@@ -458,7 +490,7 @@ Storage cascade: `sessionStorage → localStorage → memory`. Same code works o
 ### Events — delegated, cross-component
 
 ```js
-import { on, once, off, emit, listen, debounce, throttle } from '../oja/src/oja.js';
+import { on, once, off, emit, listen, debounce, throttle } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 on('.btn-delete', 'click', (e, el) => deleteItem(el.dataset.id));
 once('#confirm-ok', 'click', handleConfirm);
@@ -480,7 +512,7 @@ onResize('#chart', ({ width, height }) => redraw(width, height));
 ### Forms
 
 ```js
-import { form } from '../oja/src/oja.js';
+import { form } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 form.on('#loginForm', {
     submit: async (data) => api.post('/login', data),
@@ -513,7 +545,7 @@ form.image('#avatarInput', '#avatarPreview', {
 ### Notifications
 
 ```js
-import { notify } from '../oja/src/oja.js';
+import { notify } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 notify.success('Host added');
 notify.error('Connection failed', { duration: 8000 });
@@ -532,7 +564,7 @@ notify.setPosition('top-right'); // top-right | top-left | top-center | bottom-*
 ### Modals
 
 ```js
-import { modal } from '../oja/src/oja.js';
+import { modal } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 modal.open('confirmModal');
 modal.close();
@@ -564,7 +596,7 @@ if (confirmed) await api.delete(`/api/firewall?ip=${ip}`);
 ```
 
 ```js
-import { ui } from '../oja/src/oja.js';
+import { ui } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 on('#deploy-btn', 'click', async (e, el) => {
     const btn = ui(el);
@@ -581,7 +613,7 @@ on('#deploy-btn', 'click', async (e, el) => {
 ### Real-time — SSE and WebSocket
 
 ```js
-import { OjaSSE, OjaSocket } from '../oja/src/oja.full.js';
+import { OjaSSE, OjaSocket } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js';
 
 // Server-Sent Events — server pushes to client
 const sse = new OjaSSE('/api/events');
@@ -610,7 +642,7 @@ Both reconnect automatically with exponential backoff.
 No separate file needed. The function runs in a real Worker thread.
 
 ```js
-import { OjaWorker } from '../oja/src/oja.full.js';
+import { OjaWorker } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js';
 
 const worker = new OjaWorker((self) => {
     // ⚠️  Cannot access outer scope — treat as a separate file
@@ -628,7 +660,7 @@ component.onUnmount(() => worker.close());
 ### OjaWasm — WebAssembly
 
 ```js
-import { OjaWasm } from '../oja/src/oja.full.js';
+import { OjaWasm } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js';
 
 // Runs on main thread
 const wasm = new OjaWasm('/modules/processor.wasm');
@@ -648,7 +680,7 @@ Designed for the WebAssembly Component Model — when browsers support `import {
 ### Channel — Go-style coordination
 
 ```js
-import { Channel, go, pipeline, fanOut, fanIn } from '../oja/src/oja.full.js';
+import { Channel, go, pipeline, fanOut, fanIn } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js';
 
 // Auto-detects optimal worker pool size
 const ch = new Channel({ buffer: 10, workers: true, name: 'images' });
@@ -701,7 +733,7 @@ The boundary rule: **Would another app ever need this?** Yes → it belongs in `
 ## Logging and debugging
 
 ```js
-import { logger, debug } from '../oja/src/oja.js';
+import { logger, debug } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
 // Application events — works in production
 logger.info('auth', 'User logged in', { userId: 42 });
@@ -721,7 +753,6 @@ window._debug = debug; // access from browser console
 ```
 
 ---
-
 
 ## Design decisions
 
