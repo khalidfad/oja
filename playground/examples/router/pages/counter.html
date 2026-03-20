@@ -1,0 +1,23 @@
+<div class="page">
+    <h1>Counter</h1>
+    <div id="counter-value" style="font-size: 48px; margin: 20px 0;">0</div>
+    <button id="inc-btn" style="padding: 10px 20px; margin-right: 10px;">+</button>
+    <button id="reset-btn" style="padding: 10px 20px;">Reset</button>
+    <p style="margin-top: 20px;"><a href="#/">← Back to Home</a></p>
+</div>
+<script type="module">
+    import { context } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+
+    const [count, setCount] = context('count', 0);
+    const el = document.getElementById('counter-value');
+
+    // Update display when count changes
+    const updateDisplay = () => { el.textContent = count(); };
+    updateDisplay();
+
+    // Watch for changes from other tabs/pages
+    setInterval(updateDisplay, 100);
+
+    document.getElementById('inc-btn').onclick = () => setCount(n => n + 1);
+    document.getElementById('reset-btn').onclick = () => setCount(0);
+</script>
