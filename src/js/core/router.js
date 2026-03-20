@@ -47,6 +47,15 @@
  *   r.NotFound(Out.c('pages/404.html'));
  *   r.start('/login');
  *
+ * ─── VFS integration ──────────────────────────────────────────────────────────
+ *
+ *   const vfs = new VFS('my-app');
+ *   await vfs.mount('https://raw.githubusercontent.com/me/repo/main/');
+ *
+ *   const router = new Router({ mode: 'hash', outlet: '#app', vfs });
+ *   // All Out.component() calls now check VFS before the network.
+ *   // Works offline after first load — no service worker required.
+ *
  * ─── Prefetching ──────────────────────────────────────────────────────────────
  *
  *   // Prefetch a route when user hovers over link
@@ -133,8 +142,9 @@ export class Router {
      *   outlet  : string           — CSS selector for page container (default: '#app')
      *   loading : Out              — shown immediately while page loads (default: none)
      *   prefetch: boolean          — enable automatic prefetching (default: false)
+     *   vfs     : VFS              — VFS instance; all Out.component() calls check it first
      */
-    constructor({ mode = 'hash', outlet = '#app', loading = null, prefetch = false } = {}) {
+    constructor({ mode = 'hash', outlet = '#app', loading = null, prefetch = false, vfs = null } = {}) {
         this._mode             = mode;
         this._outlet           = outlet;
         this._loadingResponder = loading;
@@ -149,6 +159,10 @@ export class Router {
         this._beforeEach       = [];
         this._afterEach        = [];
         this._prefetchEnabled  = prefetch;
+
+        // Register VFS with Out so all component fetches check local store first.
+        // Can also be set independently via Out.vfsUse(vfs) before router.start().
+        if (vfs) Out.vfsUse(vfs);
     }
 
     // ─── Prefetching ──────────────────────────────────────────────────────────
@@ -500,11 +514,17 @@ export class Router {
             return;
         }
 
+        if (currentNavId !== this._navId) return;
+
         this._updateNav(pathname);
 
         for (const fn of this._afterEach) await fn(ctx);
 
+        if (currentNavId !== this._navId) return;
+
         if (container) await component._runMount(container);
+
+        if (currentNavId !== this._navId) return;
 
         document.dispatchEvent(new CustomEvent('oja:navigate:end', {
             detail: { path: pathname, params: ctx.params },

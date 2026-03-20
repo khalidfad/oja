@@ -17,18 +17,20 @@
  *
  *   const store = new Store('admin');
  *   store.set('page', 'hosts');
- *   store.get('page');           // → 'hosts'
- *   store.get('missing', 'dashboard'); // → 'dashboard'
- *   store.has('page');           // → true
- *   store.clear('page');         // remove one key
- *   store.clear();               // remove all keys for this namespace
- *   store.all();                 // → { page: 'hosts', ... }
+ *   store.get('page');                   // → 'hosts'
+ *   store.get('missing', 'dashboard');   // → 'dashboard'
+ *   store.has('page');                   // → true
+ *   store.clear('page');                 // remove one key
+ *   store.clear();                       // remove all keys for this namespace
+ *   store.all();                         // → { page: 'hosts', ... }
  *
  * ─── Encrypted store (for tokens and sensitive data) ─────────────────────────
  *
  *   const secure = new Store('admin', { encrypt: true });
- *   await secure.setAsync('token', jwt);   // encrypted before storage
- *   await secure.getAsync('token');        // decrypted on retrieval
+ *
+ *   // When encrypt:true all reads and writes are async — no special prefix needed
+ *   await secure.set('token', jwt);
+ *   await secure.get('token');
  *
  * ─── Storage preference ───────────────────────────────────────────────────────
  *
@@ -44,6 +46,8 @@
  *   store.offChange('page', handler);
  */
 
+import { encrypt } from './encrypt.js';
+
 // ─── Storage adapters ─────────────────────────────────────────────────────────
 
 class _SessionAdapter {
@@ -55,15 +59,15 @@ class _SessionAdapter {
             return true;
         } catch { return false; }
     }
-    get(k)      { return sessionStorage.getItem(k); }
-    set(k, v)   { sessionStorage.setItem(k, v); }
-    remove(k)   { sessionStorage.removeItem(k); }
-    keys()      {
+    get(k)    { return sessionStorage.getItem(k); }
+    set(k, v) { sessionStorage.setItem(k, v); }
+    remove(k) { sessionStorage.removeItem(k); }
+    keys()    {
         const out = [];
         for (let i = 0; i < sessionStorage.length; i++) out.push(sessionStorage.key(i));
         return out;
     }
-    clear()     { sessionStorage.clear(); }
+    clear()   { sessionStorage.clear(); }
 }
 
 class _LocalAdapter {
@@ -75,15 +79,15 @@ class _LocalAdapter {
             return true;
         } catch { return false; }
     }
-    get(k)      { return localStorage.getItem(k); }
-    set(k, v)   { localStorage.setItem(k, v); }
-    remove(k)   { localStorage.removeItem(k); }
-    keys()      {
+    get(k)    { return localStorage.getItem(k); }
+    set(k, v) { localStorage.setItem(k, v); }
+    remove(k) { localStorage.removeItem(k); }
+    keys()    {
         const out = [];
         for (let i = 0; i < localStorage.length; i++) out.push(localStorage.key(i));
         return out;
     }
-    clear()     { localStorage.clear(); }
+    clear()   { localStorage.clear(); }
 }
 
 class _MemoryAdapter {
@@ -95,81 +99,6 @@ class _MemoryAdapter {
     remove(k)    { this._map.delete(k); }
     keys()       { return [...this._map.keys()]; }
     clear()      { this._map.clear(); }
-}
-
-// ─── Encryption (Web Crypto API) ──────────────────────────────────────────────
-
-const ENC_PREFIX = '__oja_enc__:';
-const KEY_VERSION = 1;
-
-async function _deriveKey(passphrase, salt, iterations = 100000) {
-    const enc      = new TextEncoder();
-    const keyMat   = await crypto.subtle.importKey(
-        'raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']
-    );
-    return crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt: enc.encode(salt), iterations, hash: 'SHA-256' },
-        keyMat,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt', 'decrypt']
-    );
-}
-
-async function _encrypt(plaintext, passphrase, salt, aad = null) {
-    const key  = await _deriveKey(passphrase, salt);
-    const iv   = crypto.getRandomValues(new Uint8Array(12));
-    const enc  = new TextEncoder();
-    const ct   = await crypto.subtle.encrypt(
-        {
-            name: 'AES-GCM',
-            iv,
-            additionalData: aad ? enc.encode(aad) : undefined
-        },
-        key,
-        enc.encode(plaintext)
-    );
-
-    const version = KEY_VERSION;
-    const buf  = new Uint8Array(1 + 12 + ct.byteLength);
-    buf[0] = version;
-    buf.set(iv, 1);
-    buf.set(new Uint8Array(ct), 13);
-    return ENC_PREFIX + btoa(String.fromCharCode(...buf));
-}
-
-async function _decrypt(stored, passphrase, salt, aad = null) {
-    if (!stored.startsWith(ENC_PREFIX)) return stored;
-
-    const raw  = atob(stored.slice(ENC_PREFIX.length));
-    const buf  = Uint8Array.from(raw, c => c.charCodeAt(0));
-    const version = buf[0];
-    const iv   = buf.slice(1, 13);
-    const ct   = buf.slice(13);
-    const enc  = new TextEncoder();
-
-    const key  = await _deriveKey(passphrase, salt);
-    const dec  = await crypto.subtle.decrypt(
-        {
-            name: 'AES-GCM',
-            iv,
-            additionalData: aad ? enc.encode(aad) : undefined
-        },
-        key,
-        ct
-    );
-    return new TextDecoder().decode(dec);
-}
-
-async function _reencrypt(stored, oldPassphrase, newPassphrase, salt, aad = null) {
-    const plaintext = await _decrypt(stored, oldPassphrase, salt, aad);
-    return _encrypt(plaintext, newPassphrase, salt, aad);
-}
-
-function _hasCrypto() {
-    return typeof crypto !== 'undefined' &&
-        typeof crypto.subtle !== 'undefined' &&
-        typeof crypto.getRandomValues === 'function';
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -186,9 +115,9 @@ export class Store {
     constructor(namespace = 'oja', options = {}) {
         this._ns      = namespace + ':';
         this._opts    = options;
-        this._secret  = options.secret   || namespace;
-        this._aad     = options.aad      || null;
-        this._encrypt = options.encrypt  && _hasCrypto();
+        this._secret  = options.secret  || namespace;
+        this._aad     = options.aad     || null;
+        this._encrypt = options.encrypt && encrypt.available();
         this._layer   = null;
         this._changes = new Map();
 
@@ -213,27 +142,18 @@ export class Store {
 
     get storageLayer() { return this._layer.name; }
 
-    // ─── Synchronous API (no encryption) ─────────────────────────────────────
+    // ─── API — sync when encrypt:false, async when encrypt:true ──────────────
+    // When constructed with encrypt:true, set() and get() return Promises.
+    // No special naming needed — the constructor option is the contract.
 
     set(key, value) {
-        const old = this.get(key);
-        try {
-            this._layer.set(this._ns + key, JSON.stringify(value));
-            this._notify(key, value, old);
-        } catch (e) {
-            console.warn('[oja/store] set failed:', key, e);
-        }
-        return this;
+        if (this._encrypt) return this._setEncrypted(key, value);
+        return this._setSync(key, value);
     }
 
     get(key, fallback = null) {
-        try {
-            const raw = this._layer.get(this._ns + key);
-            if (raw === null || raw === undefined) return fallback;
-            return JSON.parse(raw);
-        } catch {
-            return fallback;
-        }
+        if (this._encrypt) return this._getEncrypted(key, fallback);
+        return this._getSync(key, fallback);
     }
 
     has(key) {
@@ -242,7 +162,7 @@ export class Store {
 
     clear(key) {
         if (key !== undefined) {
-            const old = this.get(key);
+            const old = this._getSync(key);
             this._layer.remove(this._ns + key);
             this._notify(key, null, old);
         } else {
@@ -250,7 +170,7 @@ export class Store {
                 .filter(k => k.startsWith(this._ns))
                 .forEach(k => {
                     const shortKey = k.slice(this._ns.length);
-                    const old = this.get(shortKey);
+                    const old = this._getSync(shortKey);
                     this._layer.remove(k);
                     this._notify(shortKey, null, old);
                 });
@@ -270,50 +190,68 @@ export class Store {
             .filter(k => k.startsWith(this._ns))
             .forEach(k => {
                 const shortKey = k.slice(this._ns.length);
-                result[shortKey] = this.get(shortKey);
+                result[shortKey] = this._getSync(shortKey);
             });
         return result;
     }
 
-    // ─── Async API (with optional encryption) ────────────────────────────────
+    // ─── Sync internals ───────────────────────────────────────────────────────
 
-    async setAsync(key, value) {
-        const serialised = JSON.stringify(value);
-        let stored = serialised;
-
-        if (this._encrypt) {
-            try {
-                stored = await _encrypt(serialised, this._secret, this._ns, this._aad);
-            } catch (e) {
-                console.warn('[oja/store] encryption failed, storing plain:', e);
-            }
-        }
-
-        const old = await this.getAsync(key);
+    _setSync(key, value) {
+        const old = this._getSync(key);
         try {
-            this._layer.set(this._ns + key, stored);
+            this._layer.set(this._ns + key, JSON.stringify(value));
             this._notify(key, value, old);
         } catch (e) {
-            console.warn('[oja/store] setAsync failed:', key, e);
+            console.warn('[oja/store] set failed:', key, e);
         }
         return this;
     }
 
-    async getAsync(key, fallback = null) {
+    _getSync(key, fallback = null) {
+        try {
+            const raw = this._layer.get(this._ns + key);
+            if (raw === null || raw === undefined) return fallback;
+            return JSON.parse(raw);
+        } catch {
+            return fallback;
+        }
+    }
+
+    // ─── Encrypted internals ──────────────────────────────────────────────────
+
+    async _setEncrypted(key, value) {
+        const serialised = JSON.stringify(value);
+        let stored = serialised;
+        try {
+            stored = await encrypt.seal(serialised, this._secret, this._ns, this._aad);
+        } catch (e) {
+            console.warn('[oja/store] encryption failed, storing plain:', e);
+        }
+        const old = await this._getEncrypted(key);
+        try {
+            this._layer.set(this._ns + key, stored);
+            this._notify(key, value, old);
+        } catch (e) {
+            console.warn('[oja/store] set failed:', key, e);
+        }
+        return this;
+    }
+
+    async _getEncrypted(key, fallback = null) {
         try {
             const raw = this._layer.get(this._ns + key);
             if (raw === null || raw === undefined) return fallback;
 
             let plain = raw;
-            if (this._encrypt && raw.startsWith(ENC_PREFIX)) {
+            if (encrypt.isSealed(raw)) {
                 try {
-                    plain = await _decrypt(raw, this._secret, this._ns, this._aad);
+                    plain = await encrypt.open(raw, this._secret, this._ns, this._aad);
                 } catch (e) {
                     console.warn('[oja/store] decryption failed:', key, e);
                     return fallback;
                 }
             }
-
             return JSON.parse(plain);
         } catch {
             return fallback;
@@ -323,69 +261,41 @@ export class Store {
     /**
      * Rotate encryption key for all stored values.
      * Re-encrypts all data with a new passphrase while preserving existing values.
-     * Returns number of keys successfully re-encrypted.
+     * Returns { successCount, errorCount }.
      */
     async rotateKey(newSecret, options = {}) {
-        if (!this._encrypt) {
-            throw new Error('[oja/store] Cannot rotate key on non-encrypted store');
-        }
+        if (!this._encrypt) throw new Error('[oja/store] Cannot rotate key on non-encrypted store');
 
-        const {
-            oldSecret = this._secret,
-            onProgress = null,
-            batchSize = 10
-        } = options;
-
+        const { oldSecret = this._secret, onProgress = null, batchSize = 10 } = options;
         const keys = this._layer.keys()
             .filter(k => k.startsWith(this._ns))
             .map(k => k.slice(this._ns.length));
 
         let successCount = 0;
-        let errorCount = 0;
+        let errorCount   = 0;
 
         for (let i = 0; i < keys.length; i += batchSize) {
-            const batch = keys.slice(i, i + batchSize);
-            await Promise.all(batch.map(async (key) => {
+            await Promise.all(keys.slice(i, i + batchSize).map(async (key) => {
                 try {
                     const raw = this._layer.get(this._ns + key);
-                    if (!raw || !raw.startsWith(ENC_PREFIX)) {
-                        errorCount++;
-                        return;
-                    }
+                    if (!raw || !encrypt.isSealed(raw)) { errorCount++; return; }
 
-                    const reencrypted = await _reencrypt(
-                        raw,
-                        oldSecret,
-                        newSecret,
-                        this._ns,
-                        this._aad
-                    );
-
+                    const reencrypted = await encrypt.rotate(raw, oldSecret, newSecret, this._ns, this._aad);
                     this._layer.set(this._ns + key, reencrypted);
                     successCount++;
-
-                    if (onProgress) {
-                        onProgress({ key, success: true });
-                    }
+                    onProgress?.({ key, success: true });
                 } catch (e) {
                     errorCount++;
-                    console.warn(`[oja/store] Failed to re-encrypt key: ${key}`, e);
-                    if (onProgress) {
-                        onProgress({ key, success: false, error: e.message });
-                    }
+                    console.warn('[oja/store] failed to re-encrypt key:', key, e);
+                    onProgress?.({ key, success: false, error: e.message });
                 }
             }));
         }
 
         if (successCount > 0) {
             this._secret = newSecret;
-            _emit('store:key-rotated', {
-                namespace: this._ns,
-                successCount,
-                errorCount
-            });
+            _emit('store:key-rotated', { namespace: this._ns, successCount, errorCount });
         }
-
         return { successCount, errorCount };
     }
 
@@ -394,46 +304,31 @@ export class Store {
      * Useful for backup or migration.
      */
     async exportEncrypted() {
-        if (!this._encrypt) {
-            throw new Error('[oja/store] Cannot export from non-encrypted store');
-        }
+        if (!this._encrypt) throw new Error('[oja/store] Cannot export from non-encrypted store');
 
         const data = {};
-        const keys = this._layer.keys()
-            .filter(k => k.startsWith(this._ns));
+        this._layer.keys()
+            .filter(k => k.startsWith(this._ns))
+            .forEach(fullKey => {
+                const raw = this._layer.get(fullKey);
+                if (encrypt.isSealed(raw)) {
+                    data[fullKey.slice(this._ns.length)] = raw;
+                }
+            });
 
-        for (const fullKey of keys) {
-            const raw = this._layer.get(fullKey);
-            if (raw && raw.startsWith(ENC_PREFIX)) {
-                const shortKey = fullKey.slice(this._ns.length);
-                data[shortKey] = raw;
-            }
-        }
-
-        return {
-            namespace: this._ns,
-            version: KEY_VERSION,
-            data
-        };
+        return { namespace: this._ns, version: 1, data };
     }
 
     /**
-     * Import encrypted data.
-     * Expects format from exportEncrypted().
+     * Import encrypted data produced by exportEncrypted().
      */
     async importEncrypted(exported) {
-        if (!this._encrypt) {
-            throw new Error('[oja/store] Cannot import to non-encrypted store');
-        }
-
-        if (exported.namespace !== this._ns) {
-            throw new Error('[oja/store] Namespace mismatch on import');
-        }
+        if (!this._encrypt) throw new Error('[oja/store] Cannot import to non-encrypted store');
+        if (exported.namespace !== this._ns) throw new Error('[oja/store] Namespace mismatch on import');
 
         for (const [key, value] of Object.entries(exported.data)) {
             this._layer.set(this._ns + key, value);
         }
-
         _emit('store:imported', { namespace: this._ns, count: Object.keys(exported.data).length });
         return this;
     }
@@ -462,22 +357,22 @@ export class Store {
     // ─── Convenience ─────────────────────────────────────────────────────────
 
     increment(key, n = 1) {
-        const current = this.get(key, 0);
-        this.set(key, (typeof current === 'number' ? current : 0) + n);
+        const current = this._getSync(key, 0);
+        this._setSync(key, (typeof current === 'number' ? current : 0) + n);
         return this;
     }
 
     push(key, value) {
-        const arr = this.get(key, []);
+        const arr = this._getSync(key, []);
         if (!Array.isArray(arr)) return this;
         arr.push(value);
-        this.set(key, arr);
+        this._setSync(key, arr);
         return this;
     }
 
     merge(key, partial) {
-        const current = this.get(key, {});
-        this.set(key, { ...current, ...partial });
+        const current = this._getSync(key, {});
+        this._setSync(key, { ...current, ...partial });
         return this;
     }
 }

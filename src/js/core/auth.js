@@ -192,9 +192,9 @@ export const auth = {
          *   await auth.session.start(jwt);
          */
         async start(token, refreshToken = null) {
-            await _tokenStore.setAsync('token', token);
+            await _tokenStore.set('token', token);
             if (refreshToken) {
-                await _tokenStore.setAsync('refresh_token', refreshToken);
+                await _tokenStore.set('refresh_token', refreshToken);
             }
             _metaStore.set('startedAt', Date.now());
 
@@ -231,10 +231,10 @@ export const auth = {
          */
         async renew(newToken, newRefreshToken = null) {
             _stopAllTimers();
-            await _tokenStore.setAsync('token', newToken);
+            await _tokenStore.set('token', newToken);
 
             if (newRefreshToken) {
-                await _tokenStore.setAsync('refresh_token', newRefreshToken);
+                await _tokenStore.set('refresh_token', newRefreshToken);
             }
 
             const payload = _decodeJWT(newToken);
@@ -264,7 +264,7 @@ export const auth = {
          * Retrieve the raw token string (async, decrypted).
          */
         async token() {
-            return _tokenStore.getAsync('token');
+            return _tokenStore.get('token');
         },
 
         /**
@@ -348,7 +348,7 @@ export const auth = {
             _refreshInProgress = true;
 
             try {
-                const refreshToken = await _tokenStore.getAsync('refresh_token');
+                const refreshToken = await _tokenStore.get('refresh_token');
                 if (!refreshToken) {
                     throw new Error('No refresh token available');
                 }
@@ -400,7 +400,7 @@ export const auth = {
          * Retrieve the raw refresh token string (async, decrypted).
          */
         async refreshToken() {
-            return _tokenStore.getAsync('refresh_token');
+            return _tokenStore.get('refresh_token');
         },
 
         /**
