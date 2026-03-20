@@ -1,18 +1,13 @@
-<!--
-  pages/game.html
-  Rhyme Rush
-
-  Demonstrates Oja handling real async complexity:
-    context()  — level index survives navigating away and back
-    state()    — phase, score, spokenWords, useAI — all reactive signals
-    effect()   — every DOM update is driven by state, zero ad-hoc writes
-    Channel    — audio → processing pipeline, decoupled from UI
-    go()       — goroutine-style async workers consuming the pipeline
-    on()       — hold-to-speak, toggle switch, next button
-    animate()  — staggered card bounce on result
-    notify     — level clear toasts
--->
-
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rhyme Rush AI — Powered by Oja</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.min.css">
+    <link rel="stylesheet" href="styles.css"
+</head>
+<body>
 <div class="game-shell">
     <h2>Rhyme Rush</h2>
     <p class="game-subtitle">Say all the words in order</p>
@@ -47,39 +42,11 @@
     </div>
 </div>
 
-<style>
-    .toggle-track {
-        width: 36px;
-        height: 20px;
-        border-radius: 10px;
-        background: #2a2a2a;
-        border: 1px solid #3a3a3a;
-        position: relative;
-        transition: background 0.2s;
-        flex-shrink: 0;
-    }
-    .toggle-track.on { background: #3a5a3a; border-color: #4a9a4a; }
-    .toggle-thumb {
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        background: #666;
-        position: absolute;
-        top: 2px;
-        left: 2px;
-        transition: left 0.2s, background 0.2s;
-    }
-    .toggle-track.on .toggle-thumb { left: 18px; background: #4a9a4a; }
-</style>
-
 <script type="module">
     import {
         state, effect, context,
-        Channel, go,
-        on, animate, notify,
-    } from '../../../../build/oja.core.esm.js';
-
-    // ── Data ──────────────────────────────────────────────────────────────────
+        Channel, go, on, find, animate, notify
+    } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
 
     const LEVELS = [
         [
@@ -126,17 +93,19 @@
     };
 
     // ── Reactive state ────────────────────────────────────────────────────────
-
     const [levelIdx, setLevelIdx] = context('gameLevel', 0);
     const [phase,    setPhase]    = state('idle');
-    const[spoken,   setSpoken]   = state([]);
+    const [spoken,   setSpoken]   = state([]);
     const [score,    setScore]    = state(0);
     const [useAI,    setUseAI]    = state(false);
-    const[whisperReady, setWhisperReady] = state(false);
+    const [whisperReady, setWhisperReady] = state(false);
 
     // ── Whisper loader ────────────────────────────────────────────────────────
-
     let whisperPipeline = null;
+    let audioCtx = null;
+    let mediaRecorder = null;
+    let recognition = null;
+    let _micStream = null;
 
     async function loadWhisper() {
         setPhase('loading');
@@ -168,7 +137,6 @@
     }
 
     // ── Channel pipeline ──────────────────────────────────────────────────────
-
     const audioChannel  = new Channel(1);
     const resultChannel = new Channel(1);
 
@@ -179,9 +147,9 @@
                 if (typeof payload === 'string') {
                     transcript = payload;
                 } else {
-                    const { blob, audioCtx } = payload;
+                    const { blob, audioCtx: ctx } = payload;
                     const buf     = await blob.arrayBuffer();
-                    const decoded = await audioCtx.decodeAudioData(buf);
+                    const decoded = await ctx.decodeAudioData(buf);
                     let   pcm     = decoded.getChannelData(0);
 
                     if (decoded.sampleRate !== 16000) {
@@ -224,7 +192,6 @@
     });
 
     // ── DOM refs ──────────────────────────────────────────────────────────────
-
     const wordGridEl  = find('#word-grid');
     const levelDotsEl = find('#level-dots');
     const resultPanel = find('#result-panel');
@@ -237,15 +204,15 @@
     const aiToggle    = find('#ai-toggle');
     const aiLabel     = find('#ai-label');
 
-    function updateStatus(msg)     { statusEl.textContent    = msg; logEl.style.display = msg ? '' : 'none'; }
-    function updateTranscript(msg) { transcriptEl.textContent = msg; }
+    function updateStatus(msg)     { if (statusEl) statusEl.textContent = msg; if (logEl) logEl.style.display = msg ? '' : 'none'; }
+    function updateTranscript(msg) { if (transcriptEl) transcriptEl.textContent = msg; }
 
     // ── Effects ───────────────────────────────────────────────────────────────
-
     effect(() => {
         const idx   = levelIdx();
         const level = LEVELS[idx];
 
+        if (!wordGridEl) return;
         wordGridEl.innerHTML = '';
         level.forEach((item, i) => {
             const card       = document.createElement('div');
@@ -261,58 +228,68 @@
             wordGridEl.appendChild(card);
         });
 
-        levelDotsEl.innerHTML = '';
-        LEVELS.forEach((_, i) => {
-            const dot       = document.createElement('div');
-            dot.className   = `level-dot ${i === idx ? 'active' : ''} ${i < idx ? 'completed' : ''}`;
-            levelDotsEl.appendChild(dot);
-        });
+        if (levelDotsEl) {
+            levelDotsEl.innerHTML = '';
+            LEVELS.forEach((_, i) => {
+                const dot       = document.createElement('div');
+                dot.className   = `level-dot ${i === idx ? 'active' : ''} ${i < idx ? 'completed' : ''}`;
+                levelDotsEl.appendChild(dot);
+            });
+        }
 
         setPhase('idle');
         setSpoken([]);
         setScore(0);
-        resultPanel.innerHTML = '';
+        if (resultPanel) resultPanel.innerHTML = '';
         updateStatus('');
         updateTranscript('');
     });
 
     effect(() => {
         const on = useAI();
-        aiToggle.className = `toggle-track ${on ? 'on' : ''}`;
-        aiLabel.textContent = on ? 'Whisper AI' : 'Browser STT';
+        if (aiToggle) aiToggle.className = `toggle-track ${on ? 'on' : ''}`;
+        if (aiLabel) aiLabel.textContent = on ? 'Whisper AI' : 'Browser STT';
     });
 
     effect(() => {
         const p = phase();
 
         if (p === 'loading') {
-            btnSpeak.disabled    = true;
-            btnSpeak.className   = 'btn-speak thinking';
-            btnSpeak.textContent = '⏳ Loading Whisper…';
-            hintEl.textContent   = 'Downloading AI model (~25MB), please wait';
+            if (btnSpeak) {
+                btnSpeak.disabled    = true;
+                btnSpeak.className   = 'btn-speak thinking';
+                btnSpeak.textContent = '⏳ Loading Whisper…';
+            }
+            if (hintEl) hintEl.textContent   = 'Downloading AI model (~25MB), please wait';
             return;
         }
 
-        btnSpeak.disabled = (p === 'thinking');
+        if (btnSpeak) btnSpeak.disabled = (p === 'thinking');
 
         if (p === 'idle') {
-            btnSpeak.className    = 'btn-speak';
-            btnSpeak.textContent  = '🎤 Click to Speak';
-            hintEl.textContent    = 'Click, say all the words, then click again to stop';
-            btnNext.style.display = 'none';
+            if (btnSpeak) {
+                btnSpeak.className    = 'btn-speak';
+                btnSpeak.textContent  = '🎤 Click to Speak';
+            }
+            if (hintEl) hintEl.textContent    = 'Click, say all the words, then click again to stop';
+            if (btnNext) btnNext.style.display = 'none';
         }
 
         if (p === 'listening') {
-            btnSpeak.style.transform = 'scale(0.96)';
-            btnSpeak.className   = 'btn-speak active';
-            btnSpeak.textContent = '🔴 Listening… click to stop';
-            hintEl.textContent   = 'Say all the words now';
+            if (btnSpeak) {
+                btnSpeak.style.transform = 'scale(0.96)';
+                btnSpeak.className   = 'btn-speak active';
+                btnSpeak.textContent = '🔴 Listening… click to stop';
+            }
+            if (hintEl) hintEl.textContent   = 'Say all the words now';
         }
 
         if (p === 'thinking') {
-            btnSpeak.className   = 'btn-speak thinking';
-            btnSpeak.textContent = '🧠 Thinking…';
-            hintEl.textContent   = 'Processing your answer';
+            if (btnSpeak) {
+                btnSpeak.className   = 'btn-speak thinking';
+                btnSpeak.textContent = '🧠 Thinking…';
+            }
+            if (hintEl) hintEl.textContent   = 'Processing your answer';
             updateStatus('▶ audio → channel → processing…');
             updateTranscript('');
         }
@@ -332,27 +309,31 @@
             const s       = words[i] || '—';
             const ok      = isMatch(item.w, s, level.map(l => l.w));
 
-            heardEl.textContent = s;
-            heardEl.className   = `word-heard ${ok ? 'match' : 'miss'}`;
-            card.classList.remove('correct', 'wrong', 'pending');
-            card.classList.add(ok ? 'correct' : 'wrong');
-
-            animate.to(card, { scale: [1.05, 1] }, { duration: 220, delay: i * 70 });
+            if (heardEl) {
+                heardEl.textContent = s;
+                heardEl.className   = `word-heard ${ok ? 'match' : 'miss'}`;
+            }
+            if (card) {
+                card.classList.remove('correct', 'wrong', 'pending');
+                card.classList.add(ok ? 'correct' : 'wrong');
+            }
         });
 
-        resultPanel.innerHTML = passed
-            ? `<div class="score-result pass">
-                   <div class="score-label" style="color:#4a9a4a">✓ ${score()}/${level.length} — Level Clear!</div>
-               </div>`
-            : `<div class="score-result fail">
-                   <div class="score-label" style="color:#9a4a4a">✗ ${score()}/${level.length} — Try again</div>
-                   <div class="score-sub">Speak clearly and close to the mic</div>
-               </div>`;
+        if (resultPanel) {
+            resultPanel.innerHTML = passed
+                ? `<div class="score-result pass">
+                       <div class="score-label" style="color:#4a9a4a">✓ ${score()}/${level.length} — Level Clear!</div>
+                   </div>`
+                : `<div class="score-result fail">
+                       <div class="score-label" style="color:#9a4a4a">✗ ${score()}/${level.length} — Try again</div>
+                       <div class="score-sub">Speak clearly and close to the mic</div>
+                   </div>`;
+        }
 
         updateStatus(`▶ pipeline complete — ${score()}/${level.length} matched`);
 
         if (passed) {
-            btnNext.style.display = levelIdx() < LEVELS.length - 1 ? 'block' : 'none';
+            if (btnNext) btnNext.style.display = levelIdx() < LEVELS.length - 1 ? 'block' : 'none';
             if (levelIdx() >= LEVELS.length - 1) {
                 notify.success('Champion! You cleared all levels! 🏆', { duration: 5000 });
             } else {
@@ -360,41 +341,41 @@
             }
         }
 
-        btnSpeak.className   = 'btn-speak';
-        btnSpeak.textContent = '🔄 Try Again';
-    });
-
-    // ── Events ────────────────────────────────────────────────────────────────
-
-    on(aiToggle, 'click', async () => {
-        const turningOn = !useAI();
-        setUseAI(turningOn);
-        if (turningOn && !whisperReady()) await loadWhisper();
-    });
-
-    // Replaced mouse Hold events with a simple Click toggle to prevent micro-clicks causing infinite fail loops
-    on(btnSpeak, 'click', (e) => {
-        if (e) e.preventDefault();
-        const p = phase();
-        if (p === 'idle' || p === 'done') {
-            startListening(e);
-        } else if (p === 'listening') {
-            stopListening(e);
+        if (btnSpeak) {
+            btnSpeak.className   = 'btn-speak';
+            btnSpeak.textContent = '🔄 Try Again';
         }
     });
 
-    on(btnNext, 'click', () => {
-        if (levelIdx() < LEVELS.length - 1) setLevelIdx(levelIdx() + 1);
-    });
+    // ── Events ────────────────────────────────────────────────────────────────
+    if (aiToggle) {
+        on(aiToggle, 'click', async () => {
+            const turningOn = !useAI();
+            setUseAI(turningOn);
+            if (turningOn && !whisperReady()) await loadWhisper();
+        });
+    }
+
+    if (btnSpeak) {
+        on(btnSpeak, 'click', (e) => {
+            if (e) e.preventDefault();
+            const p = phase();
+            if (p === 'idle' || p === 'done') {
+                startListening(e);
+            } else if (p === 'listening') {
+                stopListening(e);
+            }
+        });
+    }
+
+    if (btnNext) {
+        on(btnNext, 'click', () => {
+            if (levelIdx() < LEVELS.length - 1) setLevelIdx(levelIdx() + 1);
+        });
+    }
 
     // ── Recording ─────────────────────────────────────────────────────────────
-
-    let mediaRecorder  = null;
-    let audioChunks    =[];
-    let audioCtx       = null;
-    let recognition    = null;
-    let thinkingTimer  = null;
-    let _micStream     = null;
+    let thinkingTimer = null;
 
     function startListening(e) {
         if (e) e.preventDefault();
@@ -403,7 +384,7 @@
         setPhase('listening');
         setSpoken([]);
         setScore(0);
-        resultPanel.innerHTML = '';
+        if (resultPanel) resultPanel.innerHTML = '';
         updateTranscript('');
 
         LEVELS[levelIdx()].forEach((_, i) => {
@@ -430,6 +411,7 @@
 
         if (_micStream) {
             _micStream.getTracks().forEach(t => t.stop());
+            _micStream = null;
         }
 
         if (recognition) {
@@ -464,21 +446,20 @@
 
             _micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-            // Abort if user clicked stop while we were waiting for microphone permissions
             if (phase() !== 'listening') {
                 _micStream.getTracks().forEach(t => t.stop());
                 return;
             }
 
             mediaRecorder = new MediaRecorder(_micStream);
-            audioChunks   =[];
+            const chunks = [];
 
             mediaRecorder.ondataavailable = (e) => {
-                if (e.data.size > 0) audioChunks.push(e.data);
+                if (e.data.size > 0) chunks.push(e.data);
             };
 
             mediaRecorder.onstop = async () => {
-                const blob = new Blob(audioChunks, { type: 'audio/webm' });
+                const blob = new Blob(chunks, { type: 'audio/webm' });
                 await audioChannel.send({ blob, audioCtx });
             };
 
@@ -530,7 +511,6 @@
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
     function isMatch(target, s, allTargets) {
         if (!s) return false;
         if (s === target) return true;
@@ -566,4 +546,19 @@
         }
         return out;
     }
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+        if (audioCtx) {
+            audioCtx.close();
+        }
+        if (_micStream) {
+            _micStream.getTracks().forEach(t => t.stop());
+        }
+    });
 </script>
+
+
+
+</body>
+</html>

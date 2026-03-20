@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.css">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -39,8 +40,9 @@
     </div>
 
     <div class="main-split">
-        <div class="sidebar">
+        <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
+                <span class="collapser" id="collapseSidebar" title="Collapse Sidebar">◀</span>
                 <span>📁 Files</span>
                 <span class="add-file-btn" id="addFileSidebar" title="New file">+</span>
             </div>
@@ -62,20 +64,28 @@
         </div>
     </div>
 
-    <div class="bottom-split">
-        <div class="preview-area">
+    <div class="bottom-split" id="bottomSplit">
+        <div class="preview-area" id="previewArea">
             <div class="preview-header">
-                <span>🖥️ Live Preview</span>
-                <span class="status-badge" id="previewStatus">● auto-run</span>
+                <div class="header-left">
+                    <span class="collapser" id="collapsePreview" title="Collapse Preview">▼</span>
+                    <span>🖥️ Preview</span>
+                    <button class="icon-btn" id="toggleMobile" title="Mobile View">📱</button>
+                    <button class="icon-btn" id="toggleFull" title="Full Screen">⛶</button>
+                </div>
+                <span class="status-badge" id="previewStatus">● running</span>
             </div>
-            <div class="preview-frame">
+            <div class="preview-frame-container" id="previewContainer">
                 <iframe id="previewFrame" sandbox="allow-same-origin allow-scripts allow-forms allow-modals allow-popups"></iframe>
             </div>
         </div>
 
-        <div class="console-area">
+        <div class="console-area" id="consoleArea">
             <div class="console-header">
-                <span>📟 Console</span>
+                <div class="header-left">
+                    <span class="collapser" id="collapseConsole" title="Collapse Console">▶</span>
+                    <span>📟 Console</span>
+                </div>
                 <div class="console-actions">
                     <span class="console-clear" id="clearConsoleBtn" title="Clear console">clear</span>
                     <span class="console-pause" id="pauseConsoleBtn" title="Pause logging">⏸</span>
@@ -129,6 +139,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/brace-fold.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/xml-fold.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/javascript-hint.min.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,58 +1,45 @@
 // Oja Playground — built with Oja
-import { state, effect, context } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import {
+    state, effect, context,
+    on, find, findAll,
+    Channel, go, VFS
+} from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@v0.0.8/build/oja.core.esm.js';
 
-const OJA_CDN = 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
-
-// ─── Example registry — metadata only, HTML lives in examples/ ───────────────
-// Each example is a directory with real files and a vfs.json manifest.
-// loadExample() mounts the directory via VFS — no HTML in this file.
+const OJA_CDN = 'https://cdn.jsdelivr.net/npm/@agberohq/oja@v0.0.8/build/oja.core.esm.js';
 
 const EXAMPLES = [
-    { name: 'Counter',          desc: 'state + effect',                        dir: 'starter'   },
+    { name: 'Counter',          desc: 'state + effect basics',                 dir: 'starter'   },
     { name: 'Todo List',        desc: 'reactive array with add / remove',      dir: 'todo'      },
     { name: 'Router + Context', desc: 'multi-page SPA with shared state',      dir: 'router'    },
     { name: 'Guestbook',        desc: 'form.on + context + each()',            dir: 'guestbook' },
-    { name: 'Channel Pipeline', desc: 'Go-style async pipeline',               dir: 'channel'   },
+    { name: 'Rhyme Rush AI',    desc: 'Audio pipeline + Channel + go()',       dir: 'game'      },
+    { name: 'Channel Pipeline', desc: 'Go-style async data flow',              dir: 'channel'   },
 ];
 
-// Resolve example base URL relative to this file
+const OJA_KEYWORDS = [
+    'state', 'effect', 'context', 'derived', 'batch',
+    'Router', 'Out', 'layout', 'modal', 'notify',
+    'on', 'once', 'emit', 'listen', 'find', 'findAll',
+    'Channel', 'go', 'pipeline', 'VFS', 'Api', 'animate',
+    'component', 'ui'
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function exampleBase(dir) {
     const base = new URL(`./examples/${dir}/`, import.meta.url).href;
     return base.endsWith('/') ? base : base + '/';
 }
 
-// ─── VFS — file persistence across sessions ───────────────────────────────────
-
-let _vfs = null;
-
-async function initVFS() {
-    const { VFS } = await import('https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js');
-    _vfs = new VFS('oja-playground');
-    await _vfs.ready();
-
-    const existing = await _vfs.ls('/');
-    if (existing.length === 0) {
-        // First load — seed with the starter example
-        await _vfs.mount(exampleBase('starter'));
-        const all = await _vfs.getAll();
-        setFiles(all);
-        addLog('info', 'Playground ready');
-    } else {
-        const all = await _vfs.getAll();
-        setFiles(all);
-        const firstPath = Object.keys(all).sort()[0];
-        if (firstPath) { setActiveFile(firstPath); syncEditorContent(); }
-        addLog('info', `Loaded ${existing.length} file${existing.length === 1 ? '' : 's'} from local storage`);
-    }
-
-    _vfs.onChange('/', async () => {
-        const all = await _vfs.getAll();
-        setFiles(all);
-    });
+function iconFor(path) {
+    if (path.endsWith('.html')) return '📄';
+    if (path.endsWith('.js'))   return '⚡';
+    if (path.endsWith('.css'))  return '🎨';
+    return '📁';
 }
 
-function persistFile(path, content) {
-    if (_vfs) _vfs.write(path, content);
+function escHtml(s) {
+    return String(s).replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'": '&#39;' }[m]));
 }
 
 // ─── App state ────────────────────────────────────────────────────────────────
@@ -68,11 +55,65 @@ const [theme, setTheme]             = context('playground-theme', 'dark');
 let editor      = null;
 let updateTimer = null;
 let blobUrls    = [];
+let _vfs        = null;
 
-// ─── CodeMirror editor ────────────────────────────────────────────────────────
+// ─── VFS persistence ─────────────────────────────────────────────────────────
+
+async function initVFS() {
+    // VFS is now imported at the top level
+    _vfs = new VFS('oja-playground');
+    await _vfs.ready();
+
+    const existing = await _vfs.ls('/');
+    if (existing.length === 0) {
+        await loadExample(EXAMPLES[0]);
+    } else {
+        const all = await _vfs.getAll();
+        setFiles(all);
+        const paths = Object.keys(all).sort();
+        if (paths.length > 0) {
+            setActiveFile(paths[0]);
+            setOpenTabs(paths.slice(0, 4));
+        }
+        addLog('info', `Loaded ${existing.length} files from storage`);
+    }
+
+    _vfs.onChange('/', async () => {
+        const all = await _vfs.getAll();
+        setFiles(all);
+    });
+}
+
+function persistFile(path, content) {
+    if (_vfs) _vfs.write(path, content);
+}
+
+// ─── CodeMirror Editor ────────────────────────────────────────────────────────
+
+function setupAutocomplete() {
+    CodeMirror.registerHelper("hint", "javascript", (cm) => {
+        const cursor = cm.getCursor();
+        const line = cm.getLine(cursor.line);
+        const start = cursor.ch;
+        let wordStart = start;
+        while (wordStart > 0 && /[\w$]/.test(line.charAt(wordStart - 1))) wordStart--;
+        const curWord = line.slice(wordStart, start);
+
+        if (!curWord) return null;
+        const list = OJA_KEYWORDS.filter(w => w.startsWith(curWord));
+        if (!list.length) return null;
+
+        return {
+            list: list,
+            from: CodeMirror.Pos(cursor.line, wordStart),
+            to: CodeMirror.Pos(cursor.line, start)
+        };
+    });
+}
 
 function initEditor() {
-    const textarea = document.getElementById('editorTextarea');
+    setupAutocomplete();
+    const textarea = find('#editorTextarea');
 
     editor = CodeMirror.fromTextArea(textarea, {
         lineNumbers      : true,
@@ -87,6 +128,13 @@ function initEditor() {
         matchBrackets    : true,
         autoCloseBrackets: true,
         autoCloseTags    : true,
+        extraKeys        : { "Ctrl-Space": "autocomplete" }
+    });
+
+    editor.on('inputRead', (cm, change) => {
+        if (change.text[0].match(/[a-z]/i)) {
+            cm.showHint({ completeSingle: false });
+        }
     });
 
     editor.on('change', () => {
@@ -102,7 +150,7 @@ function initEditor() {
 
     editor.on('cursorActivity', () => {
         const c = editor.getCursor();
-        document.getElementById('cursorPosition').textContent = `Ln ${c.line + 1}, Col ${c.ch + 1}`;
+        find('#cursorPosition').textContent = `Ln ${c.line + 1}, Col ${c.ch + 1}`;
     });
 
     syncEditorContent();
@@ -112,20 +160,22 @@ function syncEditorContent() {
     if (!editor) return;
     const path    = activeFile();
     const content = files()[path] || '';
-    editor.setValue(content);
+    if (editor.getValue() !== content) {
+        editor.setValue(content);
+    }
     editor.setOption('mode',
         path.endsWith('.js')  ? 'javascript' :
             path.endsWith('.css') ? 'css'        : 'htmlmixed'
     );
-    document.getElementById('fileType').textContent = path.split('.').pop().toUpperCase();
+    find('#fileType').textContent = path.split('.').pop().toUpperCase();
 }
 
-// ─── Effects — all UI driven by state ────────────────────────────────────────
+// ─── Declarative UI Effects ──────────────────────────────────────────────────
 
 effect(() => {
     const fileMap = files();
     const active  = activeFile();
-    const list    = document.getElementById('fileTree');
+    const list    = find('#fileTree');
     const paths   = Object.keys(fileMap).sort();
 
     list.innerHTML = paths.map(p => `
@@ -136,24 +186,13 @@ effect(() => {
         </div>
     `).join('');
 
-    list.querySelectorAll('.file-item').forEach(el => {
-        el.addEventListener('click', (e) => {
-            if (e.target.classList.contains('file-del')) return;
-            openFile(el.dataset.path);
-        });
-        el.querySelector('.file-del')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            deleteFile(el.dataset.path);
-        });
-    });
-
-    document.getElementById('fileStats').textContent = `${paths.length} file${paths.length === 1 ? '' : 's'}`;
+    find('#fileStats').textContent = `${paths.length} file${paths.length === 1 ? '' : 's'}`;
 });
 
 effect(() => {
     const tabs   = openTabs();
     const active = activeFile();
-    const bar    = document.getElementById('tabBar');
+    const bar    = find('#tabBar');
 
     bar.innerHTML = tabs.map(p => `
         <div class="tab ${p === active ? 'active' : ''}" data-path="${escHtml(p)}">
@@ -161,19 +200,12 @@ effect(() => {
             <span class="tab-close" data-path="${escHtml(p)}">✕</span>
         </div>
     `).join('');
-
-    bar.querySelectorAll('.tab').forEach(el => {
-        el.addEventListener('click', (e) => {
-            if (e.target.classList.contains('tab-close')) closeTab(el.dataset.path);
-            else openFile(el.dataset.path);
-        });
-    });
 });
 
 effect(() => {
     const logs     = consoleLogs();
     const filter   = consoleFilter();
-    const panel    = document.getElementById('consoleLogs');
+    const panel    = find('#consoleLogs');
     const filtered = filter === 'all' ? logs : logs.filter(l => l.level === filter);
 
     if (filtered.length === 0) {
@@ -192,13 +224,14 @@ effect(() => {
     panel.scrollTop = panel.scrollHeight;
 });
 
-// ─── File operations ──────────────────────────────────────────────────────────
+effect(syncEditorContent);
+
+// ─── File Operations ──────────────────────────────────────────────────────────
 
 function openFile(path) {
     if (!files()[path]) return;
     if (!openTabs().includes(path)) setOpenTabs([...openTabs(), path]);
     setActiveFile(path);
-    syncEditorContent();
 }
 
 function closeTab(path) {
@@ -206,7 +239,6 @@ function closeTab(path) {
     setOpenTabs(remaining);
     if (activeFile() === path) {
         setActiveFile(remaining[0] || null);
-        syncEditorContent();
     }
 }
 
@@ -231,24 +263,16 @@ function createFile(path, content = '') {
         addLog('error', `File "${path}" already exists`);
         return;
     }
-    const body    = content || defaultContent(path);
+    const body    = content || (path.endsWith('.html') ? '<div></div>' : '');
     const updated = { ...files(), [path]: body };
     setFiles(updated);
     persistFile(path, body);
     setOpenTabs([...openTabs(), path]);
     setActiveFile(path);
-    syncEditorContent();
     runPreview();
 }
 
-function defaultContent(path) {
-    if (path.endsWith('.html')) return `<!-- ${path} -->\n<div>\n\n</div>\n`;
-    if (path.endsWith('.js'))   return `// ${path}\nimport { state, effect } from '${OJA_CDN}';\n\nconst [count, setCount] = state(0);\neffect(() => console.log('count:', count()));\n`;
-    if (path.endsWith('.css'))  return `/* ${path} */\n`;
-    return '';
-}
-
-// ─── Preview ──────────────────────────────────────────────────────────────────
+// ─── Run & Preview ────────────────────────────────────────────────────────────
 
 function runPreview() {
     blobUrls.forEach(u => URL.revokeObjectURL(u));
@@ -256,10 +280,7 @@ function runPreview() {
 
     const indexContent = files()['index.html'];
     if (!indexContent) {
-        document.getElementById('previewFrame').srcdoc = `
-            <body style="background:#0a0a0a;color:#444;display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui">
-                <div style="text-align:center"><div style="font-size:32px;margin-bottom:12px">📄</div><p>No index.html found</p></div>
-            </body>`;
+        find('#previewFrame').srcdoc = `<body><p>No index.html found</p></body>`;
         return;
     }
 
@@ -296,20 +317,13 @@ function runPreview() {
                     }, '*');
                 };
             });
-            window.addEventListener('error', e => {
-                window.parent.postMessage({ type: 'console', level: 'error',
-                    args: [e.message + ' (' + (e.filename?.split('/').pop() || 'unknown') + ':' + e.lineno + ')']
-                }, '*');
-            });
         })();
     <\/script>`;
 
     html = html.replace('</head>', bridge + '</head>');
-    document.getElementById('previewFrame').srcdoc = html;
-    document.getElementById('previewStatus').innerHTML = '● running';
+    find('#previewFrame').srcdoc = html;
+    find('#previewStatus').innerHTML = '● running';
 }
-
-// ─── Console ──────────────────────────────────────────────────────────────────
 
 function addLog(level, message) {
     if (consolePaused()) return;
@@ -321,176 +335,170 @@ function addLog(level, message) {
     }].slice(-500));
 }
 
-window.addEventListener('message', (e) => {
-    if (e.data?.type === 'console') addLog(e.data.level, e.data.args.join(' '));
-});
-
-// ─── Load example — mounts via VFS, no embedded HTML ─────────────────────────
+// ─── Example Loading ──────────────────────────────────────────────────────────
 
 async function loadExample(ex) {
-    if (!_vfs) {
-        addLog('warn', 'VFS not ready yet — try again in a moment');
-        return;
-    }
+    if (!_vfs) return;
+    addLog('info', `Loading example: ${ex.name}...`);
 
-    // Clear current VFS namespace so example files don't mix with prior state
     await _vfs.clear();
-
     const base = exampleBase(ex.dir);
-    const result = await _vfs.mount(base, { force: true });
 
-    const all   = await _vfs.getAll();
-    const paths = Object.keys(all).sort();
+    try {
+        const result = await _vfs.mount(base, { force: true });
+        const all = await _vfs.getAll();
+        const paths = Object.keys(all).sort();
 
-    setFiles(all);
-    setOpenTabs(paths.slice(0, 4));
-    setActiveFile(paths[0] || 'index.html');
-    syncEditorContent();
-    runPreview();
-    addLog('info', `Loaded: ${ex.name} (${result.fetched.length} files)`);
+        setFiles(all);
+        setOpenTabs(paths.slice(0, 4));
+        setActiveFile(paths.includes('index.html') ? 'index.html' : paths[0]);
+
+        runPreview();
+        addLog('info', `Successfully loaded ${ex.name}`);
+    } catch (e) {
+        addLog('error', `Failed to load example: ${e.message}`);
+    }
 }
 
-// ─── Theme ────────────────────────────────────────────────────────────────────
+// ─── UI Interaction (Oja `on` wiring) ─────────────────────────────────────────
 
-function applyTheme(mode) {
-    document.documentElement.setAttribute('data-theme', mode);
-    setTheme(mode);
-    if (editor) editor.setOption('theme', mode === 'dark' ? 'dracula' : 'default');
-    localStorage.setItem('oja-playground-theme', mode);
-    document.getElementById('themeToggleBtn').innerHTML = mode === 'dark' ? '<span>🌙</span>' : '<span>☀️</span>';
+function setupInteraction() {
+    on('#runBtn', 'click', runPreview);
+    on('#themeToggleBtn', 'click', () => {
+        const next = theme() === 'dark' ? 'light' : 'dark';
+        setTheme(next);
+        document.documentElement.setAttribute('data-theme', next);
+        editor.setOption('theme', next === 'dark' ? 'dracula' : 'default');
+        localStorage.setItem('oja-playground-theme', next);
+    });
+
+    on('#fileTree', 'click', (e) => {
+        const item = e.target.closest('.file-item');
+        if (!item) return;
+        if (e.target.classList.contains('file-del')) {
+            deleteFile(item.dataset.path);
+        } else {
+            openFile(item.dataset.path);
+        }
+    });
+
+    on('#addFileSidebar', 'click', () => find('#newFileDialog').classList.add('open'));
+    on('#newFileBtn', 'click', () => find('#newFileDialog').classList.add('open'));
+
+    on('#tabBar', 'click', (e) => {
+        const tab = e.target.closest('.tab');
+        if (!tab) return;
+        if (e.target.classList.contains('tab-close')) {
+            closeTab(tab.dataset.path);
+        } else {
+            openFile(tab.dataset.path);
+        }
+    });
+
+    on('#cancelDialog', 'click', () => find('#newFileDialog').classList.remove('open'));
+    on('#confirmDialog', 'click', () => {
+        const input = find('#newFileName');
+        if (input.value.trim()) {
+            createFile(input.value.trim());
+            find('#newFileDialog').classList.remove('open');
+            input.value = '';
+        }
+    });
+
+    on('#examplesBtn', 'click', () => {
+        const list = find('#exampleList');
+        list.innerHTML = EXAMPLES.map(ex => `
+            <div class="example-card" data-dir="${ex.dir}">
+                <div class="example-name">${escHtml(ex.name)}</div>
+                <div class="example-desc">${escHtml(ex.desc)}</div>
+            </div>
+        `).join('');
+        find('#examplesDialog').classList.add('open');
+    });
+
+    on('#exampleList', 'click', (e) => {
+        const card = e.target.closest('.example-card');
+        if (!card) return;
+        const ex = EXAMPLES.find(x => x.dir === card.dataset.dir);
+        if (ex) loadExample(ex);
+        find('#examplesDialog').classList.remove('open');
+    });
+
+    on('#closeExamples', 'click', () => find('#examplesDialog').classList.remove('open'));
+
+    on('#clearConsoleBtn', 'click', () => setConsoleLogs([]));
+    on('#pauseConsoleBtn', 'click', () => {
+        setPaused(!consolePaused());
+        find('#pauseConsoleBtn').textContent = consolePaused() ? '▶' : '⏸';
+    });
+
+    on('.console-filter', 'click', (e) => {
+        const chip = e.target.closest('.filter-chip');
+        if (!chip) return;
+        findAll('.filter-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        setFilter(chip.dataset.level);
+    });
+
+    on('#collapseSidebar', 'click', () => {
+        find('#sidebar').classList.toggle('collapsed');
+        setTimeout(() => editor.refresh(), 310);
+    });
+
+    on('#collapseConsole', 'click', () => find('#consoleArea').classList.toggle('collapsed'));
+    on('#collapsePreview', 'click', () => find('#previewArea').classList.toggle('collapsed'));
+    on('#toggleMobile', 'click', () => find('#previewFrame').classList.toggle('mobile-view'));
+    on('#toggleFull', 'click', () => {
+        const frame = find('#previewFrame');
+        if (frame.requestFullscreen) frame.requestFullscreen();
+    });
+
+    on(window, 'message', (e) => {
+        if (e.data?.type === 'console') addLog(e.data.level, e.data.args.join(' '));
+    });
+
+    on(document, 'keydown', e => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runPreview(); }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'n')     { e.preventDefault(); find('#newFileDialog').classList.add('open'); }
+    });
 }
-
-// ─── Panel resize ─────────────────────────────────────────────────────────────
 
 function initPanelResize() {
-    const sidebar     = document.querySelector('.sidebar');
-    const editorPanel = document.querySelector('.editor-panel');
-    const previewArea = document.querySelector('.preview-area');
-    const mainSplit   = document.querySelector('.main-split');
-    const bottomSplit = document.querySelector('.bottom-split');
-
-    const sideHandle   = document.createElement('div');
-    sideHandle.className = 'resize-handle resize-handle-x';
-    mainSplit.insertBefore(sideHandle, editorPanel);
-
-    const bottomHandle   = document.createElement('div');
-    bottomHandle.className = 'resize-handle resize-handle-x';
-    bottomSplit.insertBefore(bottomHandle, bottomSplit.children[1]);
-
-    function makeDraggable(handleEl, targetEl) {
-        handleEl.addEventListener('mousedown', (e) => {
+    const makeDraggable = (handle, target, axis) => {
+        on(handle, 'mousedown', (e) => {
             e.preventDefault();
-            const startX    = e.clientX;
-            const startSize = targetEl.offsetWidth;
-
-            const onMove = (e) => {
-                targetEl.style.width = Math.max(140, startSize + e.clientX - startX) + 'px';
+            const startPos = axis === 'x' ? e.clientX : e.clientY;
+            const startSize = axis === 'x' ? target.offsetWidth : target.offsetHeight;
+            const onMove = (moveEvt) => {
+                const currentPos = axis === 'x' ? moveEvt.clientX : moveEvt.clientY;
+                const delta = currentPos - startPos;
+                const newSize = axis === 'x' ? startSize + delta : startSize - delta;
+                if (axis === 'x') target.style.width = Math.max(40, newSize) + 'px';
+                else find('#bottomSplit').style.height = Math.max(30, newSize) + 'px';
                 if (editor) editor.refresh();
             };
             const onUp = () => {
                 document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup',   onUp);
+                document.removeEventListener('mouseup', onUp);
             };
             document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup',   onUp);
+            document.addEventListener('mouseup', onUp);
         });
-    }
-
-    makeDraggable(sideHandle,   sidebar);
-    makeDraggable(bottomHandle, previewArea);
+    };
+    makeDraggable(find('.resize-handle-x'), find('#sidebar'), 'x');
+    makeDraggable(find('.resize-handle-y'), find('#bottomSplit'), 'y');
 }
-
-// ─── Event wiring ─────────────────────────────────────────────────────────────
-
-document.getElementById('runBtn').onclick = runPreview;
-
-document.getElementById('themeToggleBtn').onclick = () => {
-    applyTheme(theme() === 'dark' ? 'light' : 'dark');
-};
-
-document.getElementById('newFileBtn').onclick    = () => document.getElementById('newFileDialog').classList.add('open');
-document.getElementById('addFileSidebar').onclick = () => document.getElementById('newFileDialog').classList.add('open');
-
-const newDialog = document.getElementById('newFileDialog');
-document.getElementById('cancelDialog').onclick  = () => newDialog.classList.remove('open');
-document.getElementById('confirmDialog').onclick = () => {
-    const name = document.getElementById('newFileName').value.trim();
-    if (name) { createFile(name); newDialog.classList.remove('open'); document.getElementById('newFileName').value = ''; }
-};
-document.getElementById('newFileName').addEventListener('keydown', e => {
-    if (e.key === 'Enter') document.getElementById('confirmDialog').click();
-    if (e.key === 'Escape') newDialog.classList.remove('open');
-});
-
-const exDialog = document.getElementById('examplesDialog');
-document.getElementById('examplesBtn').onclick = () => {
-    const list = document.getElementById('exampleList');
-    list.innerHTML = EXAMPLES.map(ex => `
-        <div class="example-card" data-name="${escHtml(ex.name)}">
-            <div class="example-name">${escHtml(ex.name)}</div>
-            <div class="example-desc">${escHtml(ex.desc)}</div>
-        </div>
-    `).join('');
-    list.querySelectorAll('.example-card').forEach(card => {
-        card.onclick = () => {
-            const ex = EXAMPLES.find(e => e.name === card.dataset.name);
-            if (ex) loadExample(ex);
-            exDialog.classList.remove('open');
-        };
-    });
-    exDialog.classList.add('open');
-};
-document.getElementById('closeExamples').onclick = () => exDialog.classList.remove('open');
-
-document.querySelectorAll('.dialog-overlay').forEach(el => {
-    el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
-});
-
-document.getElementById('clearConsoleBtn').onclick  = () => setConsoleLogs([]);
-document.getElementById('pauseConsoleBtn').onclick  = () => {
-    setPaused(!consolePaused());
-    document.getElementById('pauseConsoleBtn').innerHTML = consolePaused() ? '▶' : '⏸';
-};
-
-document.querySelectorAll('.filter-chip').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.filter-chip').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        setFilter(btn.dataset.level);
-    });
-});
-
-document.addEventListener('keydown', e => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runPreview(); }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'n')     { e.preventDefault(); newDialog.classList.add('open'); }
-});
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function iconFor(path) {
-    if (path.endsWith('.html')) return '📄';
-    if (path.endsWith('.js'))   return '⚡';
-    if (path.endsWith('.css'))  return '🎨';
-    return '📁';
-}
-
-function escHtml(s) {
-    return String(s).replace(/[&<>"']/g, m =>
-        ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'": '&#39;' }[m])
-    );
-}
-
-// ─── Boot ─────────────────────────────────────────────────────────────────────
 
 function init() {
-    const saved = localStorage.getItem('oja-playground-theme') || 'dark';
-    applyTheme(saved);
+    const savedTheme = localStorage.getItem('oja-playground-theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    setTheme(savedTheme);
+
     initEditor();
+    setupInteraction();
     initPanelResize();
-    addLog('info', 'Welcome to Oja Playground! Ctrl+Enter to run · Ctrl+N for new file');
-    initVFS()
-        .then(() => runPreview())
-        .catch(e => addLog('warn', 'VFS unavailable — files will not persist: ' + e.message));
+
+    initVFS().catch(e => addLog('warn', 'VFS unavailable: ' + e.message));
 }
 
 init();
