@@ -5,21 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Oja Playground — Build with Oja</title>
 
-    <!-- CodeMirror for syntax highlighting -->
+    <!-- CodeMirror -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.css">
 
-    <!-- Google Fonts -->
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-    <!-- Custom styles -->
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div class="playground">
-    <!-- Top Navigation Bar -->
     <div class="topbar">
         <div class="logo">
             Oja <span>playground · reactive SPA framework</span>
@@ -40,9 +38,7 @@
         </div>
     </div>
 
-    <!-- Main Split: Sidebar + Editor -->
     <div class="main-split">
-        <!-- File Tree Sidebar -->
         <div class="sidebar">
             <div class="sidebar-header">
                 <span>📁 Files</span>
@@ -54,7 +50,6 @@
             </div>
         </div>
 
-        <!-- Editor Panel with Tabs -->
         <div class="editor-panel">
             <div class="tabs" id="tabBar"></div>
             <div class="editor-wrapper">
@@ -67,9 +62,7 @@
         </div>
     </div>
 
-    <!-- Bottom Split: Preview + Console -->
     <div class="bottom-split">
-        <!-- Live Preview -->
         <div class="preview-area">
             <div class="preview-header">
                 <span>🖥️ Live Preview</span>
@@ -80,7 +73,6 @@
             </div>
         </div>
 
-        <!-- Console Output -->
         <div class="console-area">
             <div class="console-header">
                 <span>📟 Console</span>
@@ -127,7 +119,6 @@
     </div>
 </div>
 
-<!-- Scripts -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
