@@ -70,9 +70,12 @@ const _storage = {
 
 function _getStorage(type = 'memory') {
     switch (type) {
-        case 'local': return _storage.local;
-        case 'session': return _storage.session;
-        default: return _storage.memory;
+        case 'local':
+            return _storage.local;
+        case 'session':
+            return _storage.session;
+        default:
+            return _storage.memory;
     }
 }
 
@@ -106,7 +109,7 @@ class ReactiveSystem {
         this._effects = new Map();
         this._derived = new Map();
         this._nextId = 0;
-        this._actionStack =[];
+        this._actionStack = [];
 
         this._persistentStates = new Map();
     }
@@ -130,7 +133,7 @@ class ReactiveSystem {
 
         try {
             storageImpl.setItem(key, JSON.stringify(value));
-            this._sendDevToolsUpdate('persistence:saved', { key, storage });
+            this._sendDevToolsUpdate('persistence:saved', {key, storage});
         } catch (e) {
             console.warn(`[oja/reactive] Failed to persist to ${storage}:`, e);
         }
@@ -179,7 +182,7 @@ class ReactiveSystem {
 
     _getSnapshot() {
         const snapshot = {};
-        for (const [id, { name, value }] of this._states) {
+        for (const [id, {name, value}] of this._states) {
             snapshot[name || id] = value;
         }
         return snapshot;
@@ -238,21 +241,21 @@ class ReactiveSystem {
     }
 
     _trackState(id, name, value, initialValue, persistent = null) {
-        this._states.set(id, { name, value, initialValue });
+        this._states.set(id, {name, value, initialValue});
         if (persistent) {
             this._persistentStates.set(id, persistent);
         }
-        this._sendDevToolsUpdate('state:created', { id, name, value, persistent: !!persistent });
+        this._sendDevToolsUpdate('state:created', {id, name, value, persistent: !!persistent});
     }
 
     _trackEffect(id, fn) {
         this._effects.set(id, fn);
-        this._sendDevToolsUpdate('effect:created', { id });
+        this._sendDevToolsUpdate('effect:created', {id});
     }
 
     _trackDerived(id, fn, value) {
-        this._derived.set(id, { fn, value });
-        this._sendDevToolsUpdate('derived:created', { id, value });
+        this._derived.set(id, {fn, value});
+        this._sendDevToolsUpdate('derived:created', {id, value});
     }
 
     _sendDevToolsUpdate(type, data) {
@@ -270,10 +273,10 @@ class ReactiveSystem {
     }
 
     persistentState(initialValue, name, options = {}) {
-        const { store = 'local', key = `oja:${name}` } = options;
+        const {store = 'local', key = `oja:${name}`} = options;
         const savedValue = this._loadPersistent(key, store, initialValue);
 
-        const[read, write] = this._createState(savedValue, name, {
+        const [read, write] = this._createState(savedValue, name, {
             key,
             storage: store,
             defaultValue: initialValue
@@ -302,12 +305,14 @@ class ReactiveSystem {
 
         const read = () => {
             if (this._currentEffect) {
-                subscribers.add(this._currentEffect);
-
-                if (!this._dependencies.has(this._currentEffect)) {
-                    this._dependencies.set(this._currentEffect, new Set());
+                const effectRef = this._currentEffect;
+                subscribers.add(effectRef);
+                if (!this._dependencies.has(effectRef)) {
+                    this._dependencies.set(effectRef, new Set());
                 }
-                this._dependencies.get(this._currentEffect).add(() => subscribers.delete(this._currentEffect));
+                this._dependencies.get(effectRef).add(
+                    () => subscribers.delete(effectRef)
+                );
             }
             return value;
         };
@@ -361,7 +366,7 @@ class ReactiveSystem {
         }
 
         if (!skipBatch) {
-            this._sendDevToolsUpdate('state:changed', { id, oldValue, newValue });
+            this._sendDevToolsUpdate('state:changed', {id, oldValue, newValue});
         }
     }
 
@@ -374,7 +379,7 @@ class ReactiveSystem {
                 value = fn();
             } catch (e) {
                 console.warn('[oja/reactive] derived() threw — value unchanged:', e);
-                this._sendDevToolsUpdate('error:derived', { id, error: e.message });
+                this._sendDevToolsUpdate('error:derived', {id, error: e.message});
                 return;
             }
             write(value);
@@ -416,19 +421,19 @@ class ReactiveSystem {
             this._dependencies.delete(run);
             this._dirtyFlags.delete(run);
             this._effects.delete(id);
-            this._sendDevToolsUpdate('effect:disposed', { id });
+            this._sendDevToolsUpdate('effect:disposed', {id});
         };
     }
 
     batch(fn) {
         this._batchDepth++;
-        this._sendDevToolsUpdate('batch:start', { depth: this._batchDepth });
+        this._sendDevToolsUpdate('batch:start', {depth: this._batchDepth});
 
         try {
             fn();
         } finally {
             this._batchDepth--;
-            this._sendDevToolsUpdate('batch:end', { depth: this._batchDepth });
+            this._sendDevToolsUpdate('batch:end', {depth: this._batchDepth});
 
             if (this._batchDepth === 0) this._flush();
         }
@@ -448,7 +453,7 @@ class ReactiveSystem {
         if (this._flushDepth >= MAX_FLUSH_DEPTH) {
             const error = `[oja/reactive] Maximum update depth (${MAX_FLUSH_DEPTH}) exceeded. Likely a circular dependency.`;
             console.error(error);
-            this._sendDevToolsUpdate('error:max-depth', { depth: this._flushDepth });
+            this._sendDevToolsUpdate('error:max-depth', {depth: this._flushDepth});
 
             this._flushDepth = 0;
             this._effectQueue.clear();
@@ -457,11 +462,11 @@ class ReactiveSystem {
         }
 
         this._flushDepth++;
-        const queue =[...this._effectQueue];
+        const queue = [...this._effectQueue];
         this._effectQueue.clear();
         this._scheduled = false;
 
-        this._sendDevToolsUpdate('flush:start', { count: queue.length, depth: this._flushDepth });
+        this._sendDevToolsUpdate('flush:start', {count: queue.length, depth: this._flushDepth});
 
         for (const effect of queue) {
             if (this._dirtyFlags.has(effect)) {
@@ -469,7 +474,7 @@ class ReactiveSystem {
             }
         }
 
-        this._sendDevToolsUpdate('flush:end', { depth: this._flushDepth });
+        this._sendDevToolsUpdate('flush:end', {depth: this._flushDepth});
         this._flushDepth--;
     }
 

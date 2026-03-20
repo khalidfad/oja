@@ -1,6 +1,6 @@
 {
     "name": "oja",
-    "version": "0.1.0",
+    "version": "0.0.1",
     "description": "Minimal zero-build JavaScript framework for multi-app SPAs",
     "author": "Agbero HQ <https://github.com/agberohq>",
     "license": "MIT",
@@ -40,11 +40,17 @@
         "build": "make all",
         "watch": "make watch",
         "check": "make check",
-        "clean": "make clean"
+        "clean": "make clean",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:coverage": "vitest run --coverage"
     },
     "devDependencies": {
+        "@vitest/coverage-v8": "latest",
         "clean-css-cli": "latest",
         "esbuild": "latest",
-        "google-closure-compiler": "^20260316.0.0"
+        "google-closure-compiler": "^20260316.0.0",
+        "jsdom": "latest",
+        "vitest": "latest"
     }
 }

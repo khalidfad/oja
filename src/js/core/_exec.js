@@ -14,23 +14,16 @@ import { find as _find, findAll as _findAll } from './ui.js';
  *
  * ─── Container injection ──────────────────────────────────────────────────────
  *
- * Every component script automatically receives three variables:
+ * Every component script automatically receives up to three variables:
  *
  *   container  — the exact DOM element the component was mounted into.
  *   find       — pre-bound to scope within container; no second argument needed.
  *   findAll    — pre-bound to scope within container.
+ *   props      — read-only proxy of the props passed to this component.
  *
- * This ensures DOM queries are always component-scoped without the developer
- * having to remember to pass container explicitly:
- *
- *   // Barrel-imported find — still works outside components:
- *   const btn = find(container, '#submit');
- *
- *   // Inside any component script — no second argument required:
- *   const btn = find('#submit');   // automatically scoped to this instance
- *
- * Outside component scripts the barrel-exported `find` keeps its existing
- * explicit-scope signature — nothing changes for non-component code.
+ * Each variable is only injected when the script does not already declare it.
+ * This prevents duplicate-identifier crashes when a developer legitimately
+ * declares their own variable with the same name.
  *
  * Used by:
  *   - out.js        (_ComponentOut.render)
@@ -38,9 +31,9 @@ import { find as _find, findAll as _findAll } from './ui.js';
  *
  * @param {Element} container   — DOM element the HTML was mounted into
  * @param {string}  [sourceUrl] — URL the HTML was fetched from. Used as the
- * @param {object} propsData  -  Props Information
  *                                base for resolving relative import specifiers.
  *                                Falls back to document.baseURI if omitted.
+ * @param {object}  [propsData] — Props passed to the component
  */
 export function execScripts(container, sourceUrl, propsData = {}) {
     const base = sourceUrl
@@ -55,9 +48,9 @@ export function execScripts(container, sourceUrl, propsData = {}) {
         }
 
         if (old.type === 'module') {
-            const ctxKey  = '__oja_ctx_'  + Date.now() + '_' + Math.random().toString(36).slice(2);
-            const helpKey = '__oja_hlp_'  + Date.now() + '_' + Math.random().toString(36).slice(2);
-            const propsKey = '__oja_prp_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+            const ctxKey   = '__oja_ctx_'  + Date.now() + '_' + Math.random().toString(36).slice(2);
+            const helpKey  = '__oja_hlp_'  + Date.now() + '_' + Math.random().toString(36).slice(2);
+            const propsKey = '__oja_prp_'  + Date.now() + '_' + Math.random().toString(36).slice(2);
 
             window[ctxKey]  = container;
             window[helpKey] = {
@@ -97,15 +90,41 @@ export function execScripts(container, sourceUrl, propsData = {}) {
                     }
                 );
 
-            const src = [
-                'const container = window[' + JSON.stringify(ctxKey)  + '];',
-                'delete window['             + JSON.stringify(ctxKey)  + '];',
-                'const { find, findAll } = window[' + JSON.stringify(helpKey) + '];',
-                'delete window['                     + JSON.stringify(helpKey) + '];',
-                'const props = window[' + JSON.stringify(propsKey) + '];',
-                'delete window[' + JSON.stringify(propsKey) + '];',
-                body,
-            ].join('\n');
+            // container, find, and findAll are common JS names a developer may
+            // declare themselves — skip injecting whichever ones the script already
+            // declares to prevent duplicate-identifier crashes.
+            // props is Oja-specific and cannot be imported, so it is always injected.
+            const declares = (name) =>
+                new RegExp(`\\b(?:const|let|var|function)\\s+${name}\\b`).test(body);
+
+            const preamble = [];
+
+            if (!declares('container')) {
+                preamble.push(
+                    'const container = window[' + JSON.stringify(ctxKey) + '];'
+                );
+            }
+            preamble.push('delete window[' + JSON.stringify(ctxKey) + '];');
+
+            if (!declares('find') && !declares('findAll')) {
+                preamble.push(
+                    'const { find, findAll } = window[' + JSON.stringify(helpKey) + '];'
+                );
+            } else if (!declares('find')) {
+                preamble.push(
+                    'const { find } = window[' + JSON.stringify(helpKey) + '];'
+                );
+            } else if (!declares('findAll')) {
+                preamble.push(
+                    'const { findAll } = window[' + JSON.stringify(helpKey) + '];'
+                );
+            }
+            preamble.push('delete window[' + JSON.stringify(helpKey) + '];');
+
+            preamble.push('const props = window[' + JSON.stringify(propsKey) + '];');
+            preamble.push('delete window[' + JSON.stringify(propsKey) + '];');
+
+            const src = [...preamble, body].join('\n');
 
             const blob    = new Blob([src], { type: 'text/javascript' });
             const blobUrl = URL.createObjectURL(blob);
