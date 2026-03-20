@@ -1,6 +1,6 @@
 recursive = true
 output_file = "oja.txt"
-extensions = [".css",".js",".html",".md"]
+extensions = [".css",".js",".html",".md",".json"]
 exclude_dirs {
   items = ["lab", "bin", "dist","node_modules"]
 }
