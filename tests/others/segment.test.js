@@ -60,14 +60,18 @@ describe('segment.scan()', () => {
         expect(segment.list().filter(n => n === 'dup')).toHaveLength(1);
     });
 
-    it('warns on duplicate name and overwrites', () => {
+    it('warns on duplicate name during scan and overwrites', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         addTemplate('clash', '<p>first</p>');
         segment.scan();
-        segment.define('clash', '<p>second</p>');
-        segment.define('clash', '<p>third</p>');
+        // Simulate a second template with the same name appearing in a re-scan
+        const tmpl2 = document.createElement('template');
+        tmpl2.setAttribute('data-oja-segment', 'clash');
+        tmpl2.innerHTML = '<p>second</p>';
+        document.body.appendChild(tmpl2);
+        segment.scan(); // explicit re-scan picks up the duplicate
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('clash'));
-        expect(segment.get('clash')).toBe('<p>third</p>');
+        expect(segment.get('clash')).toBe('<p>second</p>');
         warn.mockRestore();
     });
 
