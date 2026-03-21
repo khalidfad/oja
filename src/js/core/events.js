@@ -107,6 +107,9 @@ export function on(selector, eventName, fn, options = {}) {
         _registry.set(eventName, []);
 
         document.body.addEventListener(eventName, (e) => {
+            // e.target may be a text node, SVG element without .closest(), or the
+            // Document node itself — none of which are Elements. Skip delegation.
+            if (!e.target || typeof e.target.closest !== 'function') return;
             const handlers = _registry.get(eventName) || [];
             for (const { selector: sel, fn: handler } of handlers) {
                 const target = e.target.closest(sel);

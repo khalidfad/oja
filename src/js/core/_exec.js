@@ -10,33 +10,51 @@ import { find as _find, findAll as _findAll } from './ui.js';
  *
  * For type="module" scripts, relative import specifiers are rewritten to
  * absolute URLs using the source component's URL as the resolution base.
- * This ensures that '../../src/js/form.js' inside 'pages/login.html' resolves
+ * This ensures that '../js/store.js' inside 'pages/hosts.html' resolves
  * correctly regardless of where index.html lives.
+ *
+ * ─── Execution mechanism: blob: URLs ─────────────────────────────────────────
+ *
+ * Module scripts are executed via blob: URLs. This is the only reliable mechanism
+ * because:
+ *   - Re-injected <script type="module"> need a URL base for relative imports.
+ *   - data: URLs have null origin, which breaks all relative import resolution.
+ *   - factory/IIFE wrappers are SyntaxErrors — static imports must be top-level.
+ *
+ * The host page must include blob: in its Content-Security-Policy script-src:
+ *
+ *   <meta http-equiv="Content-Security-Policy"
+ *         content="script-src 'self' blob: ...">
  *
  * ─── Container injection ──────────────────────────────────────────────────────
  *
- * Every component script automatically receives up to three variables:
+ * Every component script automatically receives up to four variables:
  *
  *   container  — the exact DOM element the component was mounted into.
- *   find       — pre-bound to scope within container; no second argument needed.
- *   findAll    — pre-bound to scope within container.
- *   props      — read-only proxy of the props passed to this component.
+ *   find       — pre-bound querySelector scoped to container.
+ *   findAll    — pre-bound querySelectorAll scoped to container.
+ *   props      — read-only proxy of props passed to this component.
  *
- * Each variable is only injected when the script does not already declare it.
- * This prevents duplicate-identifier crashes when a developer legitimately
- * declares their own variable with the same name.
+ * Each variable is only injected when the script does not already declare it,
+ * preventing duplicate-identifier crashes.
+ *
+ * ─── Global key hygiene ───────────────────────────────────────────────────────
+ *
+ * One window key per execution holds all scope values (down from three in the
+ * previous implementation). It is deleted on the second line of the preamble,
+ * immediately after destructuring — the key is only needed for that one read.
+ * This is safe because module scripts execute synchronously until the first await,
+ * and the key is never needed again after the destructure completes.
  *
  * ─── Return value ─────────────────────────────────────────────────────────────
  *
- * Returns a Promise that resolves once all type="module" scripts in the
- * container have fired their load event. Classic scripts resolve immediately.
- * Callers (layout.slot, component.mount) can await this to know the component
- * script has actually executed — not just been inserted into the DOM.
+ * Returns a Promise that resolves once all type="module" scripts have fired
+ * their load event. Classic scripts resolve immediately.
  *
  * @param {Element} container   — DOM element the HTML was mounted into
  * @param {string}  [sourceUrl] — URL the HTML was fetched from
- * @param {object}  [propsData] — Props passed to the component
- * @returns {Promise<void>}     — resolves after all module scripts have loaded
+ * @param {object}  [propsData] — props passed to the component
+ * @returns {Promise<void>}
  */
 export function execScripts(container, sourceUrl, propsData = {}) {
     const base = sourceUrl
@@ -53,97 +71,60 @@ export function execScripts(container, sourceUrl, propsData = {}) {
         }
 
         if (old.type === 'module') {
-            const ctxKey   = '__oja_ctx_'  + Date.now() + '_' + Math.random().toString(36).slice(2);
-            const helpKey  = '__oja_hlp_'  + Date.now() + '_' + Math.random().toString(36).slice(2);
-            const propsKey = '__oja_prp_'  + Date.now() + '_' + Math.random().toString(36).slice(2);
+            // Single key holds all scope values — reduces global surface from 3 keys to 1.
+            const scopeKey = '__oja_' + Date.now() + '_' + Math.random().toString(36).slice(2);
 
-            window[ctxKey]  = container;
-            window[helpKey] = {
+            window[scopeKey] = {
+                container,
                 find:    (sel, opts = {}) => _find(sel, { ...opts, scope: container }),
                 findAll: (sel)            => _findAll(sel, container),
+                props: new Proxy(propsData || {}, {
+                    get(target, prop) {
+                        const val = target[prop];
+                        if (typeof val === 'function' && val.__isOjaSignal) return val();
+                        return val;
+                    },
+                    set(target, prop, value) {
+                        console.error(`[Oja] Attempted to mutate props.${String(prop)} to ${value}. Props are read-only.`);
+                        return false;
+                    },
+                }),
             };
 
-            window[propsKey] = new Proxy(propsData || {}, {
-                get(target, prop) {
-                    const val = target[prop];
-                    if (typeof val === 'function' && val.__isOjaSignal) return val();
-                    return val;
-                },
-                set(target, prop, value) {
-                    console.error(`[Oja] Attempted to mutate props.${String(prop)} to ${value}. Props are read-only. Use callbacks to communicate with parents.`);
-                    return false;
-                }
-            });
+            const body = _rewriteImports(old.textContent, base);
 
-            const body = old.textContent
-                .replace(
-                    /((?:^|\n|;)\s*import\s+(?:[\w*{}][\s\S]*?)?)\bfrom\s+(['"])([^'"]+)\2/gm,
-                    function(m, prefix, q, s) {
-                        return s.startsWith('.') ? prefix + 'from ' + q + _abs(s, base) + q : m;
-                    }
-                )
-                .replace(
-                    /\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g,
-                    function(m, q, s) {
-                        return s.startsWith('.') ? 'import(' + q + _abs(s, base) + q + ')' : m;
-                    }
-                )
-                .replace(
-                    /((?:^|\n|;)\s*)import\s+(['"])([^'"]+)\2/gm,
-                    function(m, prefix, q, s) {
-                        return s.startsWith('.') ? prefix + 'import ' + q + _abs(s, base) + q : m;
-                    }
-                );
-
-            // container, find, and findAll are common JS names a developer may
-            // declare themselves — skip injecting whichever ones the script already
-            // declares to prevent duplicate-identifier crashes.
-            // props is Oja-specific and cannot be imported, so it is always injected.
+            // container, find, and findAll are common names a developer may declare
+            // themselves — only inject the ones the script does not already declare.
             const declares = (name) =>
                 new RegExp(`\\b(?:const|let|var|function)\\s+${name}\\b`).test(body);
 
-            const preamble = [];
+            const picks = [];
+            if (!declares('container')) picks.push('container');
+            if (!declares('find'))      picks.push('find');
+            if (!declares('findAll'))   picks.push('findAll');
+            picks.push('props'); // props is Oja-specific — always injected
 
-            if (!declares('container')) {
-                preamble.push(
-                    'const container = window[' + JSON.stringify(ctxKey) + '];'
-                );
-            }
-            preamble.push('delete window[' + JSON.stringify(ctxKey) + '];');
+            // The key is read once and immediately deleted. Module scripts execute
+            // synchronously until their first await, so the delete on line 2 always
+            // runs before any async gap — nothing can observe the key between these lines.
+            const preamble = [
+                `const { ${picks.join(', ')} } = window[${JSON.stringify(scopeKey)}];`,
+                `delete window[${JSON.stringify(scopeKey)}];`,
+            ];
 
-            if (!declares('find') && !declares('findAll')) {
-                preamble.push(
-                    'const { find, findAll } = window[' + JSON.stringify(helpKey) + '];'
-                );
-            } else if (!declares('find')) {
-                preamble.push(
-                    'const { find } = window[' + JSON.stringify(helpKey) + '];'
-                );
-            } else if (!declares('findAll')) {
-                preamble.push(
-                    'const { findAll } = window[' + JSON.stringify(helpKey) + '];'
-                );
-            }
-            preamble.push('delete window[' + JSON.stringify(helpKey) + '];');
-
-            preamble.push('const props = window[' + JSON.stringify(propsKey) + '];');
-            preamble.push('delete window[' + JSON.stringify(propsKey) + '];');
-
-            const src = [...preamble, body].join('\n');
-
+            const src     = [...preamble, body].join('\n');
             const blob    = new Blob([src], { type: 'text/javascript' });
             const blobUrl = URL.createObjectURL(blob);
             next.src  = blobUrl;
             next.type = 'module';
 
-            // Track load/error so callers can await actual script execution
             const p = new Promise((resolve) => {
                 const revoke = () => URL.revokeObjectURL(blobUrl);
-                next.addEventListener('load', () => { revoke(); resolve(); }, { once: true });
+                next.addEventListener('load',  () => { revoke(); resolve(); }, { once: true });
                 next.addEventListener('error', (e) => {
                     console.error('[oja/_exec] module script failed in:', sourceUrl, e);
                     revoke();
-                    resolve(); // resolve not reject — broken component should not block caller
+                    resolve(); // resolve, not reject — broken component should not block caller
                 }, { once: true });
             });
 
@@ -159,6 +140,30 @@ export function execScripts(container, sourceUrl, propsData = {}) {
     return modulePromises.length > 0
         ? Promise.all(modulePromises).then(() => {})
         : Promise.resolve();
+}
+
+/**
+ * Rewrite relative import specifiers to absolute URLs using the component's base URL.
+ * Three independent patterns cover all static and dynamic import forms without overlap.
+ * Bare specifiers (e.g. 'vue') and absolute URLs are left untouched.
+ */
+function _rewriteImports(source, base) {
+    return source
+        // from './rel' or from "../rel"  (named, namespace, default imports)
+        .replace(
+            /\bfrom\s+(['"])(\.\.?[^'"]+)\1/g,
+            (_, q, spec) => `from ${q}${_abs(spec, base)}${q}`
+        )
+        // import('./rel')  (dynamic import expression)
+        .replace(
+            /\bimport\s*\(\s*(['"])(\.\.?[^'"]+)\1\s*\)/g,
+            (_, q, spec) => `import(${q}${_abs(spec, base)}${q})`
+        )
+        // import './rel'  (side-effect import, no bindings)
+        .replace(
+            /\bimport\s+(['"])(\.\.?[^'"]+)\1/g,
+            (_, q, spec) => `import ${q}${_abs(spec, base)}${q}`
+        );
 }
 
 function _abs(specifier, base) {
