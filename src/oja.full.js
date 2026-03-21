@@ -9,11 +9,10 @@
  *   import { Router, Out }     from '../oja/src/oja.js';
  *   import { OjaSocket }       from '../oja/src/js/ext/socket.js';
  *   import { canvas }          from '../oja/src/js/ui/canvas.js';
- *   import { infiniteScroll }  from '../oja/src/js/ext/infinitescroll.js';
- *   import { clipboard }       from '../oja/src/js/ui/clipboard.js';
+ *   import { infiniteScroll }  from '../oja/src/js/ext/infinitescroll.js';\n *   import { clipboard }       from '../oja/src/js/ui/clipboard.js';
  */
 
-// ─── Everything in core ───────────────────────────────────────────────────────
+// ─── Everything in core (includes engine, formatter, register) ────────────────
 export * from './oja.js';
 
 // ─── Extensions — js/ext/ ────────────────────────────────────────────────────
@@ -38,6 +37,9 @@ export { exporter }                                       from './js/ext/export.
 // Scroll patterns
 export { infiniteScroll }                                 from './js/ext/infinitescroll.js';
 export { pullToRefresh }                                  from './js/ext/pulltorefresh.js';
+
+// Charts
+export { chart }                                          from './js/ext/chart.js';
 
 // ─── UI extensions — js/ui/ ──────────────────────────────────────────────────
 // Opt-in DOM and interaction utilities.

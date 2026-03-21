@@ -686,6 +686,34 @@ class _ListOut extends _Out {
             return;
         }
 
+        // Keyed path — delegate to engine.listAsync for minimal DOM updates
+        if (this._options.key) {
+            const { listAsync } = await import('./engine.js');
+            const itemFn = this._itemFn;
+            await listAsync(container, items, {
+                key:    this._options.key,
+                keyAttr: 'data-list-key',
+                render: async (item, existingEl) => {
+                    const slot    = existingEl || document.createElement('div');
+                    const itemOut = itemFn(item);
+                    if (!_Out.is(itemOut)) {
+                        throw new Error(`[oja/out] Out.list() itemFn must return an Out (got ${typeof itemOut})`);
+                    }
+                    await itemOut.render(slot, { ...context, item });
+                    return slot;
+                },
+                empty: this._options.empty
+                    ? async () => {
+                        const el = document.createElement('div');
+                        await this._options.empty.render(el, context);
+                        return el;
+                    }
+                    : null,
+            });
+            return;
+        }
+
+        // Unkeyed fallback — existing full-rebuild path
         container.innerHTML = '';
 
         await Promise.all(items.map(async (item, index) => {
@@ -813,6 +841,28 @@ class OutTarget {
 
     retry(count) {
         this._retryCount = count;
+        return this;
+    }
+
+    // Diff the container against newHtml and patch only what changed.
+    // Delegates to engine.morph() — preserves focus, scroll, and event listeners.
+    morph(html) {
+        const el = this._resolve();
+        if (!el) return this;
+        import('./engine.js').then(({ morph }) => morph(el, html));
+        return this;
+    }
+
+    // Bind this element to a store key for reactive text/html/class/attr updates.
+    // Named bindKey to avoid collision with the existing signal-based bind() method.
+    // type: 'text' | 'html' | 'class' | 'attr'  (default: 'text')
+    bindKey(storeKey, type = 'text', transform) {
+        const el = this._resolve();
+        if (!el) return this;
+        const fnName = `bind${type.charAt(0).toUpperCase() + type.slice(1)}`;
+        import('./engine.js').then(mod => {
+            if (typeof mod[fnName] === 'function') mod[fnName](el, storeKey, transform);
+        });
         return this;
     }
 

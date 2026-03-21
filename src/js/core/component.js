@@ -478,7 +478,7 @@ export const component = {
         const scope = _scopes.get(el);
         if (!scope) return;
         for (const fn of scope.mount) {
-            try { await fn(); } catch (e) {
+            try { await fn(el); } catch (e) {
                 console.warn('[oja/component] onMount hook error:', e);
             }
         }

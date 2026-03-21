@@ -1,4 +1,8 @@
 // src/js/core/template.js
+import {
+    uppercase, lowercase, titleCase, toJson, formatBytes,
+    timeAgo, formatDate, formatTime, truncate, fallback,
+} from './formatter.js';
 /**
  * oja/template.js
  * Fills HTML with data. Two syntax styles, both valid HTML, no compiler.
@@ -99,8 +103,19 @@ let _i18n = {
     }
 };
 
-const _filters = new Map([['upper',   (s)       => String(s ?? '').toUpperCase()],['lower',   (s)       => String(s ?? '').toLowerCase()],['title',   (s)       => String(s ?? '').replace(/\b\w/g, l => l.toUpperCase())],['json',    (v)       => JSON.stringify(v)],['date',    (ts)      => ts ? new Date(ts).toLocaleDateString() : ''],['time',    (ts)      => ts ? new Date(ts).toLocaleTimeString() : ''],
-    ['ago',     (ts)      => _timeAgo(ts)],['default', (v, dflt) => (v !== undefined && v !== null && v !== '') ? v : (dflt ?? '')],['trunc',   (s, n)    => { const str = String(s ?? ''); return str.length > n ? str.slice(0, n) + '…' : str; }],['bytes',   (n)       => _formatBytes(Number(n) || 0)],['t',       (key, ...args) => _translate(key, ...args)],['pluralize', (count, word, pluralForm) => _i18n.pluralize(count, word, pluralForm)],
+const _filters = new Map([
+    ['upper',     uppercase],
+    ['lower',     lowercase],
+    ['title',     titleCase],
+    ['json',      toJson],
+    ['date',      formatDate],
+    ['time',      formatTime],
+    ['ago',       timeAgo],
+    ['default',   fallback],
+    ['trunc',     truncate],
+    ['bytes',     (n) => formatBytes(Number(n) || 0)],
+    ['t',         (key, ...args) => _translate(key, ...args)],
+    ['pluralize', (count, word, pluralForm) => _i18n.pluralize(count, word, pluralForm)],
 ]);
 
 const _cache = new Map();
@@ -528,20 +543,4 @@ function _esc(str) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
-}
-
-function _timeAgo(ts) {
-    if (!ts) return '';
-    const secs = Math.floor((Date.now() - new Date(ts)) / 1000);
-    if (secs < 60)    return `${secs}s ago`;
-    if (secs < 3600)  return `${Math.floor(secs / 60)}m ago`;
-    if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-    return `${Math.floor(secs / 86400)}d ago`;
-}
-
-function _formatBytes(b) {
-    if (!b) return '0 B';
-    const k = 1024, units = ['B','KB','MB','GB','TB'];
-    const i = Math.floor(Math.log(b) / Math.log(k));
-    return `${(b / Math.pow(k, i)).toFixed(1)} ${units[i]}`;
 }

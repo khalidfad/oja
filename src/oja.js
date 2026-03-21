@@ -112,6 +112,31 @@ export { logger }                                         from './js/core/logger
 export { debug }                                          from './js/core/debug.js';
 export { adapter }                                        from './js/core/adapter.js';
 
+// ─── Engine ───────────────────────────────────────────────────────────────────
+export {
+    engine,
+    morph, shouldMorph,
+    scan, unbind, enableAutoBind, disableAutoBind,
+    bindText, bindHtml, bindClass, bindAttr, bindToggle,
+    list, listAsync,
+    batch,
+    formatters,
+}                                                         from './js/core/engine.js';
+
+// ─── Formatters ───────────────────────────────────────────────────────────────
+export {
+    uppercase, lowercase, capitalize, titleCase,
+    toJson, toCompactJson,
+    formatBytes, formatPercent,
+    timeAgo, formatDate, formatTime,
+    truncate, fallback,
+    booleanStatus, booleanClass,
+}                                                         from './js/core/formatter.js';
+
+// ─── Event Registry (optional strict mode) ────────────────────────────────────
+export { events, register, strictMode, isRegistered, getRegistered }
+    from './js/core/register.js';
+
 // ─── Version ──────────────────────────────────────────────────────────────────
 export const VERSION = '0.0.1';
 
