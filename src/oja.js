@@ -101,6 +101,7 @@ export { modal }                                          from './js/ui/modal.js
 export { notify }                                         from './js/ui/notify.js';
 export { form }                                           from './js/ui/form.js';
 export { validate }                                       from './js/ui/validate.js';
+export { autocomplete }                                   from './js/ui/autocomplete.js';
 
 // ─── Extension layer — js/ext/ ────────────────────────────────────────────────
 export { auth }                                           from './js/ext/auth.js';
@@ -117,6 +118,7 @@ export { encrypt }                                        from './js/utils/encry
 export { logger }                                         from './js/utils/logger.js';
 export { debug }                                          from './js/utils/debug.js';
 export { adapter }                                        from './js/utils/adapter.js';
+export { Trie, Search }                                   from './js/utils/search.js';
 
 export {
     uppercase, lowercase, capitalize, titleCase,
@@ -157,9 +159,11 @@ import { layout }                                                     from './js
 import { modal }                                                      from './js/ui/modal.js';
 import { notify }                                                     from './js/ui/notify.js';
 import { animate }                                                    from './js/core/animate.js';
-import { form }                                                       from './js/ui/form.js';
-import { validate }                                                   from './js/ui/validate.js';
-import { auth }                                                       from './js/ext/auth.js';
+import { form }                                                        from './js/ui/form.js';
+import { validate }                                                    from './js/ui/validate.js';
+import { autocomplete }                                                from './js/ui/autocomplete.js';
+import { Trie, Search }                                                from './js/utils/search.js';
+import { auth }                                                        from './js/ext/auth.js';
 import { Channel, go, pipeline, fanOut, fanIn, merge, split }        from './js/ext/channel.js';
 import { Runner }                                                     from './js/ext/runner.js';
 import { VFS }                                                        from './js/ext/vfs.js';
@@ -208,7 +212,9 @@ export const Oja = {
     afterEl, beforeEl, toggleEl,
     matches, closest,
     // Forms
-    form, validate,
+    form, validate, autocomplete,
+    // Search
+    Trie, Search,
     // Events
     on, once, off, emit, listen, listenOnce, waitFor,
     debounce, throttle, rafThrottle, keys,
