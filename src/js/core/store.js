@@ -46,7 +46,7 @@
  *   store.offChange('page', handler);
  */
 
-import { encrypt } from './encrypt.js';
+import { encrypt } from '../utils/encrypt.js';
 
 // ─── Storage adapters ─────────────────────────────────────────────────────────
 

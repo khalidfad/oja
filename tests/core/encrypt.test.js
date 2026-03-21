@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encrypt } from '../../src/js/core/encrypt.js';
+import { encrypt } from '../../src/js/utils/encrypt.js';
 
 // ─── available ────────────────────────────────────────────────────────────────
 

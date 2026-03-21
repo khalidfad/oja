@@ -58,8 +58,8 @@
  *   notify.setPosition('bottom-center');
  */
 
-import { listen, emit } from './events.js';
-import { Out }          from './out.js';
+import { listen, emit } from '../core/events.js';
+import { Out }          from '../core/out.js';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 

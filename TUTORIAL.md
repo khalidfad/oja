@@ -160,7 +160,7 @@ const [b, setB] = state(0);
 
 effect(() => console.log(a() + b())); // runs once on creation
 
-batch(() => {
+nextFrame(() => {
     setA(1);
     setB(2);
 }); // effect runs once here, not twice

@@ -56,8 +56,8 @@
  *   <div class="drawer-backdrop" id="drawerBackdrop"></div>
  */
 
-import { emit, listen, on } from './events.js';
-import { Out }              from './out.js';
+import { emit, listen, on } from '../core/events.js';
+import { Out }              from '../core/out.js';
 
 // ─── Focus trap ───────────────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@
 import {
     uppercase, lowercase, titleCase, toJson, formatBytes,
     timeAgo, formatDate, formatTime, truncate, fallback,
-} from './formatter.js';
+} from '../utils/formatter.js';
 /**
  * oja/template.js
  * Fills HTML with data. Two syntax styles, both valid HTML, no compiler.

@@ -64,8 +64,8 @@
  *   auth.hasClaim('sub', '42') // → true/false
  */
 
-import { Store }       from './store.js';
-import { emit, listen } from './events.js';
+import { Store }       from '../core/store.js';
+import { emit, listen } from '../core/events.js';
 
 // ─── Token storage ────────────────────────────────────────────────────────────
 // Cascade: sessionStorage (encrypted) → localStorage (encrypted) → memory

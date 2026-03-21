@@ -260,8 +260,8 @@
 
 import { component }         from './component.js';
 import { ui }                from './ui.js';
-import { adapter }           from './adapter.js';
-import { auth }              from './auth.js';
+import { adapter }           from '../utils/adapter.js';
+import { auth }              from '../ext/auth.js';
 import { Out }               from './out.js';
 
 // ─── Internal state ───────────────────────────────────────────────────────────

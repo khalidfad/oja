@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Channel, go } from '../../src/js/core/channel.js';
+import { Channel, go } from '../../src/js/ext/channel.js';
 
 // ─── Channel — basic send / receive ───────────────────────────────────────────
 

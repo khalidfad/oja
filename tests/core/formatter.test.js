@@ -6,7 +6,7 @@ import {
     timeAgo, formatDate, formatTime,
     truncate, fallback,
     booleanStatus, booleanClass,
-} from '../../src/js/core/formatter.js';
+} from '../../src/js/utils/formatter.js';
 
 describe('uppercase()', () => {
     it('converts to uppercase', () => expect(uppercase('hello')).toBe('HELLO'));

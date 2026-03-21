@@ -84,7 +84,7 @@ import { emit }   from './events.js';
 import {
     uppercase, lowercase, capitalize, toJson, toCompactJson,
     formatBytes, formatPercent, fallback, booleanClass, booleanStatus,
-} from './formatter.js';
+} from '../utils/formatter.js';
 
 // ─── Internal Store (lazy fallback) ──────────────────────────────────────────
 
@@ -567,6 +567,8 @@ export function list(container, items, options = {}) {
         const el      = render(item, found, i);
         if (!el) continue;
         if (!el.getAttribute(keyAttr)) el.setAttribute(keyAttr, itemKey);
+        // If render returned a new element instead of reusing found, remove the stale one
+        if (found && el !== found) found.remove();
         order.push(el);
         used.add(itemKey);
     }
@@ -639,15 +641,15 @@ export async function listAsync(container, items, options = {}) {
 // ─── Batch ────────────────────────────────────────────────────────────────────
 
 /**
- * Defer a batch of store updates to the next animation frame.
+ * Defer a nextFrame of store updates to the next animation frame.
  * Prevents multiple repaints when updating several keys at once.
  *
- *   await engine.batch(() => {
+ *   await engine.nextFrame(() => {
  *       engine.set('cpu', '72%');
  *       engine.set('mem', '1.2GB');
  *   });
  */
-export function batch(fn) {
+export function nextFrame(fn) {
     return new Promise(resolve => requestAnimationFrame(() => { fn(); resolve(); }));
 }
 
@@ -748,6 +750,6 @@ export const engine = {
     bindToggle,
     list,
     listAsync,
-    batch,
+    batch: nextFrame,
     formatters,
 };

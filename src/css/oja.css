@@ -223,3 +223,536 @@
     .oja-toast          { opacity: 1; transform: none; }
     .oja-toast-leaving  { opacity: 0; }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+TABLE
+═══════════════════════════════════════════════════════════════════════════════ */
+
+.oja-table-wrap {
+    border: 1px solid var(--oja-table-border, var(--border, #e5e7eb));
+    border-radius: var(--oja-radius, 8px);
+    overflow: hidden;
+    background: var(--oja-table-bg, var(--bg, #ffffff));
+    font-size: var(--oja-table-font-size, 13px);
+}
+
+.oja-table-compact .oja-table th,
+.oja-table-compact .oja-table td {
+    padding: 6px 10px;
+}
+
+.oja-table-scroll {
+    overflow-x: auto;
+    width: 100%;
+}
+
+/* ─── Table element ───────────────────────────────────────────────────────── */
+
+.oja-table {
+    width: 100%;
+    border-collapse: collapse;
+    line-height: 1.4;
+}
+
+.oja-table th,
+.oja-table td {
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--oja-table-border, var(--border, #e5e7eb));
+    vertical-align: middle;
+}
+
+/* ─── Header ──────────────────────────────────────────────────────────────── */
+
+.oja-table thead th {
+    background: var(--oja-table-header-bg, var(--panel-bg, #f9fafb));
+    color: var(--oja-table-header-color, var(--text-mute, #6b7280));
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+/* Sortable header */
+.oja-table .oja-th-sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.oja-table .oja-th-sortable:hover {
+    background: var(--oja-table-header-hover, var(--hover-bg, #f3f4f6));
+}
+
+.oja-table .oja-th-sortable::after {
+    content: ' ⇅';
+    opacity: 0.4;
+    font-size: 10px;
+}
+
+.oja-table .oja-th-asc::after  { content: ' ▲'; opacity: 1; color: var(--oja-table-accent, var(--accent, #0066ff)); }
+.oja-table .oja-th-desc::after { content: ' ▼'; opacity: 1; color: var(--oja-table-accent, var(--accent, #0066ff)); }
+
+/* ─── Body rows ───────────────────────────────────────────────────────────── */
+
+.oja-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.oja-table tbody tr:hover td {
+    background: var(--oja-table-row-hover, var(--hover-bg, #f9fafb));
+}
+
+.oja-table .oja-row-clickable {
+    cursor: pointer;
+}
+
+/* ─── Cell content ────────────────────────────────────────────────────────── */
+
+.oja-table .oja-cell-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+}
+
+.oja-table .oja-cell-content a {
+    color: var(--oja-table-link, var(--accent, #0066ff));
+    text-decoration: none;
+}
+
+.oja-table .oja-cell-content a:hover {
+    text-decoration: underline;
+}
+
+/* Truncation modes */
+.oja-trunc-ellipsis .oja-cell-content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; display: block; }
+.oja-trunc-fade     .oja-cell-content { white-space: nowrap; overflow: hidden; max-width: 240px; -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%); mask-image: linear-gradient(to right, black 80%, transparent 100%); display: block; }
+.oja-trunc-wrap     .oja-cell-content { white-space: normal; word-break: break-word; }
+
+/* Copy cell */
+.oja-copy-cell {
+    position: relative;
+}
+
+.oja-copy-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    opacity: 0;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--text-mute, #6b7280);
+    transition: opacity 0.15s;
+    vertical-align: middle;
+}
+
+.oja-copy-cell:hover .oja-copy-btn {
+    opacity: 1;
+}
+
+.oja-copy-btn:hover {
+    background: var(--hover-bg, #f3f4f6);
+    color: var(--accent, #0066ff);
+}
+
+/* Badge */
+.oja-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    background: var(--oja-badge-bg, var(--hover-bg, #f3f4f6));
+    color: var(--oja-badge-color, var(--text-mute, #6b7280));
+}
+
+.oja-badge-success { background: var(--success, #00cf78); color: #fff; }
+.oja-badge-danger,
+.oja-badge-error   { background: var(--danger,  #ff3b30); color: #fff; }
+.oja-badge-warning,
+.oja-badge-warn    { background: var(--warning, #ffcc00); color: #1a1a1a; }
+.oja-badge-info    { background: var(--info,    #0066ff); color: #fff; }
+
+/* Actions column */
+.oja-td-actions {
+    text-align: center;
+    white-space: nowrap;
+}
+
+.oja-action-btn {
+    background: none;
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 12px;
+    color: var(--text-mute, #6b7280);
+    margin: 0 2px;
+    transition: all 0.15s;
+}
+
+.oja-action-btn:hover {
+    background: var(--hover-bg, #f3f4f6);
+    color: var(--fg, #1a1a1a);
+    border-color: var(--accent, #0066ff);
+}
+
+/* Numbering column */
+.oja-td-num {
+    color: var(--text-mute, #6b7280);
+    font-size: 11px;
+    text-align: center;
+    width: 40px;
+}
+
+/* ─── Group rows ──────────────────────────────────────────────────────────── */
+
+.oja-group-header {
+    cursor: pointer;
+    background: var(--oja-table-header-bg, var(--panel-bg, #f9fafb));
+}
+
+.oja-group-header:hover {
+    background: var(--oja-table-header-hover, var(--hover-bg, #f3f4f6));
+}
+
+.oja-group-header td {
+    padding: 8px 14px;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.oja-group-label  { margin-right: 8px; }
+.oja-group-count  {
+    display: inline-flex;
+    align-items: center;
+    background: var(--oja-table-accent, var(--accent, #0066ff));
+    color: #fff;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-right: 8px;
+}
+.oja-group-toggle { float: right; color: var(--text-mute, #6b7280); font-size: 10px; }
+
+/* ─── States ──────────────────────────────────────────────────────────────── */
+
+.oja-state-cell {
+    text-align: center;
+    padding: 40px 20px !important;
+    color: var(--text-mute, #6b7280);
+    border-bottom: none !important;
+}
+
+.oja-loading-state,
+.oja-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+}
+
+.oja-spinner {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border, #e5e7eb);
+    border-top-color: var(--oja-table-accent, var(--accent, #0066ff));
+    border-radius: 50%;
+    animation: oja-spin 0.8s linear infinite;
+}
+
+@keyframes oja-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ─── Footer ──────────────────────────────────────────────────────────────── */
+
+.oja-table-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-top: 1px solid var(--oja-table-border, var(--border, #e5e7eb));
+    background: var(--oja-table-header-bg, var(--panel-bg, #f9fafb));
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.oja-page-info {
+    font-size: 12px;
+    color: var(--text-mute, #6b7280);
+}
+
+.oja-page-nav {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.oja-page-btn {
+    min-width: 32px;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid var(--oja-table-border, var(--border, #e5e7eb));
+    background: var(--oja-table-bg, var(--bg, #fff));
+    color: var(--fg, #1a1a1a);
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.oja-page-btn:hover:not(:disabled) {
+    background: var(--hover-bg, #f3f4f6);
+}
+
+.oja-page-btn.active {
+    background: var(--oja-table-accent, var(--accent, #0066ff));
+    color: #fff;
+    border-color: var(--oja-table-accent, var(--accent, #0066ff));
+}
+
+.oja-page-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.oja-load-more-btn {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    border: 1px dashed var(--oja-table-border, var(--border, #e5e7eb));
+    background: none;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--oja-table-accent, var(--accent, #0066ff));
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.oja-load-more-btn:hover {
+    background: var(--hover-bg, #f3f4f6);
+}
+
+/* ─── Mobile cards ────────────────────────────────────────────────────────── */
+
+.oja-mobile-cards {
+    display: none;
+    padding: 8px;
+    gap: 8px;
+    flex-direction: column;
+}
+
+.oja-card {
+    border: 1px solid var(--oja-table-border, var(--border, #e5e7eb));
+    border-radius: var(--oja-radius, 8px);
+    padding: 12px;
+    background: var(--oja-table-bg, var(--bg, #fff));
+    font-size: 13px;
+}
+
+.oja-card-primary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.oja-card-num {
+    background: var(--oja-table-accent, var(--accent, #0066ff));
+    color: #fff;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+.oja-card-primary-val {
+    font-weight: 600;
+    color: var(--fg, #1a1a1a);
+    flex: 1;
+}
+
+.oja-card-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.oja-card-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 40%;
+    min-width: 100px;
+}
+
+.oja-card-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-mute, #6b7280);
+    background: var(--oja-table-header-bg, var(--panel-bg, #f9fafb));
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.oja-card-val {
+    font-size: 13px;
+    color: var(--fg, #1a1a1a);
+    word-break: break-word;
+}
+
+.oja-card-toggle {
+    display: block;
+    width: 100%;
+    background: none;
+    border: none;
+    border-top: 1px solid var(--oja-table-border, var(--border, #e5e7eb));
+    margin-top: 8px;
+    padding-top: 6px;
+    font-size: 10px;
+    color: var(--text-mute, #6b7280);
+    cursor: pointer;
+    text-align: center;
+}
+
+.oja-card-details {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    border-top: 1px solid var(--oja-table-border, var(--border, #e5e7eb));
+    padding-top: 8px;
+}
+
+.oja-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+    margin-top: 6px;
+}
+
+/* Switch between table and cards at mobile breakpoint */
+@media (max-width: 768px) {
+    .oja-table-scroll { display: none; }
+    .oja-mobile-cards { display: flex; }
+    .oja-table-footer { justify-content: center; }
+    .oja-page-nav     { justify-content: center; }
+}
+
+@media (min-width: 769px) {
+    .oja-mobile-cards { display: none !important; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   TABS
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+.oja-tabs {
+    display: flex;
+    gap: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.oja-tabs::-webkit-scrollbar { display: none; }
+
+/* ─── Line variant (default) ──────────────────────────────────────────────── */
+
+.oja-tabs-line {
+    border-bottom: 2px solid var(--oja-tab-border, var(--border, #e5e7eb));
+}
+
+.oja-tabs-line .oja-tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;          /* sit on top of container border */
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-mute, #6b7280);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.oja-tabs-line .oja-tab-btn:hover:not(:disabled) {
+    color: var(--fg, #1a1a1a);
+}
+
+.oja-tabs-line .oja-tab-btn.active {
+    color: var(--oja-tab-accent, var(--accent, #0066ff));
+    border-bottom-color: var(--oja-tab-accent, var(--accent, #0066ff));
+}
+
+.oja-tabs-line .oja-tab-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ─── Pill variant ────────────────────────────────────────────────────────── */
+
+.oja-tabs-pill {
+    gap: 4px;
+    padding: 4px;
+    background: var(--oja-tab-pill-bg, var(--panel-bg, #f3f4f6));
+    border-radius: var(--oja-radius, 8px);
+    width: fit-content;
+}
+
+.oja-tabs-pill .oja-tab-btn {
+    background: none;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-mute, #6b7280);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+}
+
+.oja-tabs-pill .oja-tab-btn:hover:not(:disabled) {
+    background: var(--oja-tab-pill-hover, rgba(0,0,0,0.05));
+    color: var(--fg, #1a1a1a);
+}
+
+.oja-tabs-pill .oja-tab-btn.active {
+    background: var(--oja-tab-pill-active-bg, var(--bg, #fff));
+    color: var(--oja-tab-accent, var(--accent, #0066ff));
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+}
+
+.oja-tabs-pill .oja-tab-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ─── Reduced motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+    .oja-spinner                { animation: none; opacity: 0.6; }
+    .oja-tabs-line .oja-tab-btn,
+    .oja-tabs-pill .oja-tab-btn,
+    .oja-action-btn,
+    .oja-page-btn,
+    .oja-copy-btn               { transition: none; }
+}
+
+

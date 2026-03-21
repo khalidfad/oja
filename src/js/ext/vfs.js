@@ -67,8 +67,8 @@
  */
 
 import { Runner } from './runner.js';
-import { state }  from './reactive.js';
-import { Out }    from './out.js';
+import { state }  from '../core/reactive.js';
+import { Out }    from '../core/out.js';
 
 // ─── MIME helpers (main thread) ────────────────────────────────────────────────
 

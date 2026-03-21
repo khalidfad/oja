@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { notify } from '../../src/js/core/notify.js';
+import { notify } from '../../src/js/ui/notify.js';
 
 beforeEach(() => {
     document.body.innerHTML = '';

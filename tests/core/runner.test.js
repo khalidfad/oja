@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Runner } from '../../src/js/core/runner.js';
+import { Runner } from '../../src/js/ext/runner.js';
 
 // Runner uses real Workers — jsdom supports them via vitest's jsdom environment.
 // Each test creates and closes its own Runner to avoid state leakage.

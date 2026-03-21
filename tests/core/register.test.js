@@ -6,18 +6,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 describe('register.js — event dictionary', () => {
 
     it('isRegistered returns false before any register() call', async () => {
-        const { isRegistered } = await import('../../src/js/core/register.js');
+        const { isRegistered } = await import('../../src/js/utils/register.js');
         expect(isRegistered('never:registered')).toBe(false);
     });
 
     it('register() adds names and isRegistered returns true', async () => {
-        const { register, isRegistered } = await import('../../src/js/core/register.js');
+        const { register, isRegistered } = await import('../../src/js/utils/register.js');
         register(['test:event-a']);
         expect(isRegistered('test:event-a')).toBe(true);
     });
 
     it('register() is additive across multiple calls', async () => {
-        const { register, isRegistered } = await import('../../src/js/core/register.js');
+        const { register, isRegistered } = await import('../../src/js/utils/register.js');
         register(['test:event-b']);
         register(['test:event-c']);
         expect(isRegistered('test:event-b')).toBe(true);
@@ -25,7 +25,7 @@ describe('register.js — event dictionary', () => {
     });
 
     it('getRegistered() returns a Set of all registered names', async () => {
-        const { register, getRegistered } = await import('../../src/js/core/register.js');
+        const { register, getRegistered } = await import('../../src/js/utils/register.js');
         register(['test:event-d', 'test:event-e']);
         const all = getRegistered();
         expect(all.has('test:event-d')).toBe(true);
@@ -33,7 +33,7 @@ describe('register.js — event dictionary', () => {
     });
 
     it('getRegistered() returns a copy — mutating it does not affect the registry', async () => {
-        const { register, getRegistered, isRegistered } = await import('../../src/js/core/register.js');
+        const { register, getRegistered, isRegistered } = await import('../../src/js/utils/register.js');
         register(['test:immutable']);
         const copy = getRegistered();
         copy.delete('test:immutable');
@@ -41,7 +41,7 @@ describe('register.js — event dictionary', () => {
     });
 
     it('emit() with registered name does not warn', async () => {
-        const { register, emit } = await import('../../src/js/core/register.js');
+        const { register, emit } = await import('../../src/js/utils/register.js');
         register(['test:valid-emit']);
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         emit('test:valid-emit', {});
@@ -50,7 +50,7 @@ describe('register.js — event dictionary', () => {
     });
 
     it('emit() with unregistered name warns in default mode', async () => {
-        const { register, emit } = await import('../../src/js/core/register.js');
+        const { register, emit } = await import('../../src/js/utils/register.js');
         register(['test:something-else']);  // activate the registry
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         emit('test:not:registered', {});
@@ -59,7 +59,7 @@ describe('register.js — event dictionary', () => {
     });
 
     it('listen() with unregistered name warns in default mode', async () => {
-        const { register, listen } = await import('../../src/js/core/register.js');
+        const { register, listen } = await import('../../src/js/utils/register.js');
         register(['test:something']);  // activate
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const unsub = listen('test:unregistered:listen', () => {});
@@ -69,7 +69,7 @@ describe('register.js — event dictionary', () => {
     });
 
     it('strictMode(true) makes emit throw on unregistered names', async () => {
-        const { register, strictMode, emit } = await import('../../src/js/core/register.js');
+        const { register, strictMode, emit } = await import('../../src/js/utils/register.js');
         register(['test:strict-only']);  // activate
         strictMode(true);
         expect(() => emit('test:strict-typo', {})).toThrow('test:strict-typo');
@@ -77,7 +77,7 @@ describe('register.js — event dictionary', () => {
     });
 
     it('strictMode(false) reverts to warn-only', async () => {
-        const { register, strictMode, emit } = await import('../../src/js/core/register.js');
+        const { register, strictMode, emit } = await import('../../src/js/utils/register.js');
         register(['test:warn-mode']);
         strictMode(true);
         strictMode(false);
@@ -87,7 +87,7 @@ describe('register.js — event dictionary', () => {
     });
 
     it('register() warns and returns early for empty array', async () => {
-        const { register } = await import('../../src/js/core/register.js');
+        const { register } = await import('../../src/js/utils/register.js');
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         register([]);
         expect(warnSpy).toHaveBeenCalled();
@@ -95,7 +95,7 @@ describe('register.js — event dictionary', () => {
     });
 
     it('events convenience object exposes all methods', async () => {
-        const { events } = await import('../../src/js/core/register.js');
+        const { events } = await import('../../src/js/utils/register.js');
         expect(typeof events.register).toBe('function');
         expect(typeof events.strictMode).toBe('function');
         expect(typeof events.isRegistered).toBe('function');

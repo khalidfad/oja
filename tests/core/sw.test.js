@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { sw } from '../../src/js/core/sw.js';
+import { sw } from '../../src/js/ext/sw.js';
 
 // ─── ServiceWorker environment shim ──────────────────────────────────────────
 // sw.js guards all navigator.serviceWorker access at call time, so we can

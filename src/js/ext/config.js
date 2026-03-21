@@ -75,7 +75,7 @@
  *   config.all()           // → full parsed object or {}
  */
 
-import { emit } from './events.js';
+import { emit } from '../core/events.js';
 
 const CONFIG_FILENAME = 'oja.config.json';
 

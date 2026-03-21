@@ -154,7 +154,7 @@
 
 // ─── Dirty tracking state ─────────────────────────────────────────────────────
 
-import { Out } from './out.js';
+import { Out } from '../core/out.js';
 
 const _dirtyState = new WeakMap(); // form -> Map<fieldName, { original, current, isDirty }>
 const _dirtyListeners = new WeakMap(); // form -> Set<function>

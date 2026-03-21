@@ -79,7 +79,7 @@
  *   const merged = fanIn([ch1, ch2, ch3]);
  */
 
-import { debug } from './debug.js';
+import { debug } from '../utils/debug.js';
 
 // ─── Channel ──────────────────────────────────────────────────────────────────
 

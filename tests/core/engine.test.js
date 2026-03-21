@@ -4,7 +4,7 @@ import {
     scan, unbind, enableAutoBind, disableAutoBind,
     bindText, bindHtml, bindClass, bindAttr, bindToggle,
     list, listAsync,
-    batch,
+    nextFrame,
     formatters,
     useStore,
 } from '../../src/js/core/engine.js';
@@ -412,12 +412,12 @@ describe('useStore()', () => {
 describe('batch()', () => {
     it('resolves after the callback runs', async () => {
         let ran = false;
-        await batch(() => { ran = true; });
+        await nextFrame(() => { ran = true; });
         expect(ran).toBe(true);
     });
 
     it('returns a Promise', () => {
-        expect(batch(() => {}) instanceof Promise).toBe(true);
+        expect(nextFrame(() => {}) instanceof Promise).toBe(true);
     });
 });
 

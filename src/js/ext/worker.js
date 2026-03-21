@@ -68,7 +68,7 @@
  *   component.onUnmount(() => worker.close());
  */
 
-import { debug } from '../core/debug.js';
+import { debug } from '../utils/debug.js';
 
 // ─── Worker bootstrap code ───────────────────────────────────────────────────
 // This string runs inside the Worker thread. It sets up the self.handle()

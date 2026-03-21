@@ -45,7 +45,7 @@
  *   local production builds.
  */
 
-import { emit as _emit, listen as _listen } from './events.js';
+import { emit as _emit, listen as _listen } from '../core/events.js';
 
 const _registered = new Set();
 let   _strict     = false;

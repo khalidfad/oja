@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validate } from '../../src/js/core/validate.js';
+import { validate } from '../../src/js/ui/validate.js';
 
 // ─── required ─────────────────────────────────────────────────────────────────
 

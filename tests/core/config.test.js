@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { config } from '../../src/js/core/config.js';
+import { config } from '../../src/js/ext/config.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { VFS } from '../../src/js/core/vfs.js';
+import { VFS } from '../../src/js/ext/vfs.js';
 
 // Each test uses a unique VFS namespace to avoid IndexedDB collisions
 let nsCounter = 0;
