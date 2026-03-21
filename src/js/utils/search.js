@@ -105,7 +105,13 @@ export class Trie {
      * Return true if the key exists in the trie.
      */
     has(key) {
-        return this.get(key) !== null;
+        if (!key || typeof key !== 'string') return false;
+        let node = this.root;
+        for (const char of key.toLowerCase()) {
+            if (!node.children.has(char)) return false;
+            node = node.children.get(char);
+        }
+        return node.isEnd;
     }
 
     /**
