@@ -364,9 +364,10 @@ export const modal = {
             _pendingConfirms.set(id, resolve);
 
             const done = (result) => {
+                if (!_pendingConfirms.has(id)) return;
                 _pendingConfirms.delete(id);
-                modal.closeById(id);
                 resolve(result);
+                modal.closeById(id);
             };
 
             modal.open(id, { message, ...options });
