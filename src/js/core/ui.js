@@ -170,6 +170,28 @@ export function query(selector, scope = document) {
     return _renderable(el);
 }
 
+/**
+ * queryAll(selector, scope?) — scoped querySelectorAll, never auto-injected.
+ * Returns a plain Array (not NodeList) so .forEach/.map/.filter work directly.
+ * Safe alternative to findAll when you need DOM queries inside component scripts
+ * without risking name conflicts with injected variables.
+ *
+ *   import { queryAll } from '../lib/oja.full.esm.js';
+ *
+ *   // All .chip elements inside a container:
+ *   queryAll('.chip', container).forEach(c => c.classList.remove('active'));
+ *
+ *   // Falls back to document when no scope given:
+ *   queryAll('.chart-tab').forEach(t => t.classList.remove('active'));
+ *
+ * @param {string}  selector
+ * @param {Element} [scope=document]
+ * @returns {Element[]}
+ */
+export function queryAll(selector, scope = document) {
+    return Array.from((scope || document).querySelectorAll(selector));
+}
+
 export function findAllIn(scope, selectors, options = {}) {
     const { required = false } = options;
 
@@ -362,12 +384,10 @@ class UiElement {
      * Returns the original promise so callers can still await/chain it.
      */
     track(promise, opts = {}) {
-        const {
-            loading    = opts.loading  ?? this._el.dataset.loading ?? 'Loading…',
-            success    = opts.success  ?? this._el.dataset.success ?? '✓',
-            error      = opts.error    ?? this._el.dataset.error   ?? '✗ Failed',
-            resetAfter = opts.resetAfter ?? 2000,
-        } = opts;
+        const loading    = opts.loading    ?? this._el.dataset.loading ?? 'Loading…';
+        const success    = opts.success    ?? this._el.dataset.success ?? '✓';
+        const error      = opts.error      ?? this._el.dataset.error   ?? '✗ Failed';
+        const resetAfter = opts.resetAfter ?? 2000;
 
         this.loading(loading);
 
