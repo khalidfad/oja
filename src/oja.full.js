@@ -1,60 +1,94 @@
 /**
- * oja.full.js — full barrel entry point (core + ui + ext + utils)
+ * oja.full.js — full barrel (kernel + ui + ext + utils)
  *
- * Use this when you want everything:
- *   import { Router, Out, modal, chart, table, tabs, auth } from '../oja/src/oja.full.js';
+ * Use this when you want everything in one import:
  *
- * For production apps, import from the specific layer instead:
- *   import { Router, Out }    from '../oja/src/oja.js';           — kernel only
- *   import { modal, notify }  from '../oja/src/js/ui/modal.js';   — ui layer
- *   import { auth }           from '../oja/src/js/ext/auth.js';   — ext layer
- *   import { encrypt }        from '../oja/src/js/utils/encrypt.js'; — utils
+ *   import { Router, Out, modal, chart, auth, pagination } from './oja.full.js';
  *
- * ─── Layer summary ────────────────────────────────────────────────────────────
+ * For production apps that care about bundle size, import from specific layers:
  *
- *   js/core/    store, reactive, events, engine, template, out,
- *               component, _exec, router, layout, animate, ui, plugin
+ *   import { Router, Out }   from './oja.js';            — kernel only
+ *   import { modal, notify } from './js/ui/modal.js';    — ui layer
+ *   import { auth }          from './js/ext/auth.js';    — ext layer
+ *   import { encrypt }       from './js/utils/encrypt.js';
  *
- *   js/ui/      modal, notify, form, validate,
- *               canvas, clipboard, dragdrop, table, tabs
+ * ─── What is in each layer ────────────────────────────────────────────────────
  *
- *   js/ext/     auth, channel, config, history, sw, vfs, runner, chart,
- *               socket, worker, wasm, webrtc, infinitescroll, pulltorefresh,
- *               lazy, cssvars, export
+ *   oja.js (kernel)
+ *     System:    timeout, interval, sleep, defer, withDefer
+ *     State:     Store, state, effect, derived, batch, context
+ *     Rendering: Out, Responder, render, template, segment, animate
+ *     Routing:   Router, component, layout
+ *     DOM:       ui, find, findAll, query, queryAll, createEl …
+ *     Events:    on, emit, listen, keys, debounce …
+ *     Engine:    engine, morph, bindText, bindClass …
+ *     Network:   Api
+ *     Codecs:    JsonCodec, MsgPackCodec
+ *     Plugin:    plugin
  *
- *   js/utils/   encrypt, logger, debug, adapter, formatter, register
+ *   js/ui/  (UI patterns)
+ *     modal, notify, clipboard, form, validate, autocomplete,
+ *     table, tabs, canvas, dragdrop
+ *
+ *   js/ext/ (opt-in features)
+ *     auth, pagination, chart, history, channel, config,
+ *     runner, vfs, sw, socket, worker, wasm, webrtc,
+ *     infiniteScroll, pullToRefresh, cssVars, lazy, exporter
+ *
+ *   js/utils/ (pure utilities)
+ *     encrypt, logger, debug, adapter, search (Trie, Search),
+ *     formatter, register
  */
 
-// ─── Core + UI + Utils (from oja.js) ─────────────────────────────────────────
+// ─── Kernel ───────────────────────────────────────────────────────────────────
 export * from './oja.js';
 
 // ─── UI layer — js/ui/ ────────────────────────────────────────────────────────
+export { modal }                                          from './js/ui/modal.js';
+export { notify }                                         from './js/ui/notify.js';
+export { clipboard }                                      from './js/ui/clipboard.js';
+export { form }                                           from './js/ui/form.js';
+export { validate }                                       from './js/ui/validate.js';
+export { autocomplete }                                   from './js/ui/autocomplete.js';
 export { table }                                          from './js/ui/table.js';
 export { tabs }                                           from './js/ui/tabs.js';
 export { canvas }                                         from './js/ui/canvas.js';
-export { clipboard }                                      from './js/ui/clipboard.js';
 export { dragdrop }                                       from './js/ui/dragdrop.js';
 
 // ─── Extension layer — js/ext/ ────────────────────────────────────────────────
-
-// Charts & visualisation
+export { auth }                                           from './js/ext/auth.js';
+export { pagination }                                     from './js/ext/pagination.js';
 export { chart }                                          from './js/ext/chart.js';
-
-// Real-time
+export { OjaHistory, history }                            from './js/ext/history.js';
+export { Channel, go, pipeline, fanOut, fanIn,
+    merge, split }                                        from './js/ext/channel.js';
+export { config }                                         from './js/ext/config.js';
+export { Runner }                                         from './js/ext/runner.js';
+export { VFS }                                            from './js/ext/vfs.js';
+export { sw }                                             from './js/ext/sw.js';
 export { OjaSSE, OjaSocket }                              from './js/ext/socket.js';
-
-// Concurrency
 export { OjaWorker }                                      from './js/ext/worker.js';
 export { OjaWasm }                                        from './js/ext/wasm.js';
-
-// Peer-to-peer
 export { webrtc }                                         from './js/ext/webrtc.js';
-
-// Scroll patterns
 export { infiniteScroll }                                 from './js/ext/infinitescroll.js';
 export { pullToRefresh }                                  from './js/ext/pulltorefresh.js';
-
-// Runtime utilities
 export { cssVars }                                        from './js/ext/cssvars.js';
 export { lazy }                                           from './js/ext/lazy.js';
 export { exporter }                                       from './js/ext/export.js';
+
+// ─── Utilities — js/utils/ ────────────────────────────────────────────────────
+export { encrypt }                                        from './js/utils/encrypt.js';
+export { logger }                                         from './js/utils/logger.js';
+export { debug }                                          from './js/utils/debug.js';
+export { adapter }                                        from './js/utils/adapter.js';
+export { Trie, Search }                                   from './js/utils/search.js';
+export {
+    uppercase, lowercase, capitalize, titleCase,
+    toJson, toCompactJson,
+    formatBytes, formatPercent,
+    timeAgo, formatDate, formatTime,
+    truncate, fallback,
+    booleanStatus, booleanClass,
+}                                                         from './js/utils/formatter.js';
+export { events, register, strictMode, isRegistered, getRegistered }
+    from './js/utils/register.js';
