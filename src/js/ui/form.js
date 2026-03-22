@@ -1248,6 +1248,19 @@ export const form = {
         return this;
     },
 
+    /**
+     * serialize() — alias for collect().
+     * Returns the same typed plain object: numbers stay numbers, checkboxes
+     * become booleans, radio groups return the checked value, files return FileList.
+     * The name collect() was chosen because serialize() conventionally implies
+     * a string output (like URLSearchParams). Both names work identically.
+     *
+     *   const data = form.serialize(e.target);  // same as form.collect(e.target)
+     */
+    serialize(target) {
+        return this.collect(target);
+    },
+
     // ─── XHR upload with progress ─────────────────────────────────────────────
 
     /**
