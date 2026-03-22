@@ -13,12 +13,11 @@ function cleanup(el) {
     if (el?.parentNode) el.remove();
 }
 
-// Stub fetch so Out.component() does not hit the network
 function stubFetch(html) {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok:   true,
+        ok:     true,
         status: 200,
-        text: () => Promise.resolve(html),
+        text:   () => Promise.resolve(html),
     }));
 }
 
@@ -38,9 +37,8 @@ describe('Out.raw()', () => {
         expect(Out.raw('<p/>').type).toBe('raw');
     });
 
-    it('does not execute inline scripts (no execScripts call)', async () => {
+    it('does not execute inline scripts', async () => {
         el = makeContainer();
-        // If execScripts ran it would throw in jsdom — raw should not call it
         await expect(Out.raw('<p>safe</p>').render(el)).resolves.not.toThrow();
         expect(el.querySelector('p').textContent).toBe('safe');
     });
@@ -76,7 +74,7 @@ describe('Out.if()', () => {
         expect(el.textContent).toBe('no');
     });
 
-    it('renders Out.empty() when condition is false and no elseOut is provided', async () => {
+    it('renders Out.empty() when condition is false and no elseOut provided', async () => {
         el = makeContainer();
         el.textContent = 'before';
         await Out.if(() => false, Out.text('yes')).render(el);
@@ -167,7 +165,7 @@ describe('Out.promise()', () => {
         expect(el.textContent).toBe('network down');
     });
 
-    it('renders nothing on rejection when no error Out is provided', async () => {
+    it('renders nothing on rejection when no error Out provided', async () => {
         el = makeContainer();
         el.textContent = 'before';
         const p = Promise.reject(new Error('err'));
@@ -304,7 +302,7 @@ describe('Out.component() — vfsOverride', () => {
 
     it('does not touch the global _vfs when using options.vfs', async () => {
         el = makeContainer();
-        const globalVfs   = { readText: vi.fn().mockResolvedValue('<p>global</p>'), write: vi.fn() };
+        const globalVfs   = { readText: vi.fn().mockResolvedValue('<p>global</p>'),   write: vi.fn() };
         const instanceVfs = { readText: vi.fn().mockResolvedValue('<p>instance</p>'), write: vi.fn() };
 
         Out.vfsUse(globalVfs);
@@ -383,7 +381,69 @@ describe('Out — cacheStats() and clearCache()', () => {
     });
 });
 
-// ─── Out.to().render(out) — symmetry with el.render(out) ────────────────────
+// ─── Out.to() — tagged template literal ──────────────────────────────────────
+
+describe('Out.to() — tagged template literal', () => {
+    let el;
+    afterEach(() => { cleanup(el); });
+
+    it('renders static string via tagged template', () => {
+        el = makeContainer();
+        Out.to(el)`<p>Hello</p>`;
+        expect(el.innerHTML).toBe('<p>Hello</p>');
+    });
+
+    it('interpolates a single value', () => {
+        el = makeContainer();
+        const name = 'World';
+        Out.to(el)`<h1>Hello ${name}!</h1>`;
+        expect(el.innerHTML).toBe('<h1>Hello World!</h1>');
+    });
+
+    it('interpolates multiple values', () => {
+        el = makeContainer();
+        const a = 'foo', b = 42;
+        Out.to(el)`${a} and ${b}`;
+        expect(el.innerHTML).toBe('foo and 42');
+    });
+
+    it('escapes XSS in interpolated values', () => {
+        el = makeContainer();
+        const xss = '<script>alert(1)</script>';
+        Out.to(el)`<div>${xss}</div>`;
+        expect(el.innerHTML).not.toContain('<script>');
+        expect(el.innerHTML).toContain('&lt;script&gt;');
+    });
+
+    it('does not escape the template string itself', () => {
+        el = makeContainer();
+        Out.to(el)`<strong>${'safe'}</strong>`;
+        expect(el.innerHTML).toBe('<strong>safe</strong>');
+    });
+
+    it('proxy is callable without throwing', () => {
+        el = makeContainer();
+        expect(() => Out.to(el)`hello`).not.toThrow();
+    });
+
+    it('method chaining still works through the proxy', () => {
+        el = makeContainer();
+        Out.to(el).text('hi');
+        expect(el.textContent).toBe('hi');
+    });
+
+    it('.html() works through the proxy', () => {
+        el = makeContainer();
+        Out.to(el).html('<em>test</em>');
+        expect(el.innerHTML).toBe('<em>test</em>');
+    });
+
+    it('does not throw when selector finds nothing', () => {
+        expect(() => Out.to('#nonexistent')`hello`).not.toThrow();
+    });
+});
+
+// ─── Out.to().render(Out) — symmetry with find().render(out) ─────────────────
 
 describe('Out.to().render(Out)', () => {
     let el;
@@ -408,7 +468,7 @@ describe('Out.to().render(Out)', () => {
         expect(el.innerHTML).toBe('<strong>bold</strong>');
     });
 
-    it('Out.to().render() with no argument still works as the terminal await helper', async () => {
+    it('Out.to().render() with no argument works as terminal await helper', async () => {
         el = makeContainer();
         const target = Out.to(el);
         target.text('settled');
@@ -422,5 +482,34 @@ describe('Out.to().render(Out)', () => {
         const ret = await Out.to(el).render(Out.text('x'));
         expect(typeof ret).toBe('object');
         expect(ret).not.toBe(el);
+    });
+});
+
+// ─── Out.component() — non-string url warning ─────────────────────────────────
+
+describe('Out.component() — non-string url warning', () => {
+    it('warns when url is an _Out object', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        Out.component(Out.text('hello'));
+        expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining('[oja/out] _ComponentOut received a non-string url:'),
+            expect.anything(),
+            expect.stringContaining('.render(Out.text(...))')
+        );
+        warn.mockRestore();
+    });
+
+    it('warns when url is null', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        Out.component(null);
+        expect(warn).toHaveBeenCalled();
+        warn.mockRestore();
+    });
+
+    it('does NOT warn when url is a valid string', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        Out.component('pages/host.html');
+        expect(warn).not.toHaveBeenCalled();
+        warn.mockRestore();
     });
 });

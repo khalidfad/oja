@@ -464,6 +464,15 @@ class _LinkOut extends _Out {
 class _ComponentOut extends _Out {
     constructor(url, data = {}, lists = {}, options = {}) {
         super('component', url, options);
+        // Guard: url must be a string path. A common mistake is passing an _Out
+        // object here — e.g. Out.to('#el').component(Out.text('hello')) — which
+        // should be Out.to('#el').render(Out.text('hello')) instead.
+        if (typeof url !== 'string') {
+            console.warn(
+                '[oja/out] _ComponentOut received a non-string url:', url,
+                '\nDid you mean .render(Out.text(...)) instead of .component(Out.text(...))?'
+            );
+        }
         this._data       = data;
         this._lists      = lists;
         this._prefetched = false;
@@ -1113,16 +1122,24 @@ export const Out = {
 
     // Entry point for the fluent API — returns a chainable OutTarget.
     // Supports method chaining and tagged template literal syntax.
+    //
+    // The tagged template form — Out.to('#el')`<h1>Hello ${name}!</h1>` —
+    // requires the returned value to be callable. A Proxy can only intercept
+    // `apply` when the proxy target is itself a function, so we wrap a dummy
+    // function and forward all property access to the real OutTarget.
     to(target) {
         const outTarget = new OutTarget(target);
-        return new Proxy(outTarget, {
-            get(targetObj, prop) {
+        // Dummy function — gives the Proxy a callable target so the `apply`
+        // trap fires when the result is used as a tagged template tag.
+        const fn = function() {};
+        return new Proxy(fn, {
+            get(_fn, prop) {
                 if (prop === Symbol.for('nodejs.util.promisify.custom')) return undefined;
-                if (typeof targetObj[prop] === 'function') return targetObj[prop].bind(targetObj);
-                return targetObj[prop];
+                const val = outTarget[prop];
+                return typeof val === 'function' ? val.bind(outTarget) : val;
             },
-            apply(targetObj, thisArg, args) {
-                return createTagHandler(targetObj._target).apply(thisArg, args);
+            apply(_fn, _thisArg, args) {
+                return createTagHandler(target).apply(outTarget, args);
             }
         });
     },

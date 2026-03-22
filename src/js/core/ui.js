@@ -349,6 +349,36 @@ class UiElement {
         return this;
     }
 
+    /**
+     * Track a Promise — auto-transitions loading → done/error → reset.
+     *
+     *   ui(btn).track(api.post('/save', data), {
+     *       loading: 'Saving…',
+     *       success: 'Saved ✓',
+     *       error:   'Failed',
+     *       resetAfter: 2000,   // ms before reset after success/error (default: 2000)
+     *   });
+     *
+     * Returns the original promise so callers can still await/chain it.
+     */
+    track(promise, opts = {}) {
+        const {
+            loading    = opts.loading  ?? this._el.dataset.loading ?? 'Loading…',
+            success    = opts.success  ?? this._el.dataset.success ?? '✓',
+            error      = opts.error    ?? this._el.dataset.error   ?? '✗ Failed',
+            resetAfter = opts.resetAfter ?? 2000,
+        } = opts;
+
+        this.loading(loading);
+
+        promise.then(
+            ()  => { this.done(success);  if (resetAfter) setTimeout(() => this.reset(), resetAfter); },
+            (e) => { this.error(typeof error === 'function' ? error(e) : error); },
+        );
+
+        return promise;
+    }
+
     get isLoading() { return this._el.classList.contains('oja-loading'); }
     get el() { return this._el; }
 }
@@ -371,6 +401,35 @@ export function ui(target) {
 
     return new UiElement(el);
 }
+
+/**
+ * ui.btn — static API for button/link state management.
+ * Identical to ui(el).method() but accepts the element directly.
+ * Use this when you already have the element reference (e.g. inside an event handler).
+ *
+ *   on('#save', 'click', async (e, el) => {
+ *       ui.btn.loading(el, 'Saving…');
+ *       try {
+ *           await api.post('/save', data);
+ *           ui.btn.done(el, 'Saved ✓');
+ *       } catch(e) {
+ *           ui.btn.error(el, 'Failed');
+ *       }
+ *   });
+ *
+ *   // Promise shorthand — auto loading → success/error → reset:
+ *   ui.btn.track(el, savePromise, { loading: 'Saving…', success: 'Saved ✓' });
+ *
+ * Works on <button>, <a>, and any element with disabled support.
+ * Stores original content in el._ojaOriginal — safe across rapid calls.
+ */
+ui.btn = {
+    loading(el, message) { return ui(el).loading(message); },
+    done(el, message)    { return ui(el).done(message); },
+    error(el, message)   { return ui(el).error(message); },
+    reset(el)            { return ui(el).reset(); },
+    track(el, promise, opts) { return ui(el).track(promise, opts); },
+};
 
 ui.theme = {
     set(name) {

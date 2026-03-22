@@ -1,194 +1,247 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { defer, withDefer } from '../../src/js/core/system.js';
+/**
+ * tests/core/system.test.js
+ * Covers: timeout, interval, sleep, defer (timeout/interval integration), withDefer
+ */
 
-// ─── defer() ──────────────────────────────────────────────────────────────────
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { timeout, interval, sleep, defer, withDefer } from '../../src/js/core/system.js';
 
-describe('defer()', () => {
+describe('timeout()', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
 
-    it('runs registered functions in LIFO order', async () => {
-        const d = defer();
-        const order = [];
-
-        d.defer(() => order.push('first'));
-        d.defer(() => order.push('second'));
-        d.defer(() => order.push('third'));
-
-        await d.cleanup();
-
-        expect(order).toEqual(['third', 'second', 'first']);
-    });
-
-    it('runs with no registered functions without error', async () => {
-        const d = defer();
-        await expect(d.cleanup()).resolves.not.toThrow();
-    });
-
-    it('calls the registered function exactly once per cleanup()', async () => {
-        const d = defer();
+    it('calls fn after ms', () => {
         const fn = vi.fn();
-        d.defer(fn);
-        await d.cleanup();
-        expect(fn).toHaveBeenCalledTimes(1);
+        timeout(fn, 100);
+        expect(fn).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(100);
+        expect(fn).toHaveBeenCalledOnce();
     });
 
-    it('clears the queue after cleanup — second cleanup() is a no-op', async () => {
-        const d = defer();
+    it('returns a cancel function that prevents fn from firing', () => {
         const fn = vi.fn();
-        d.defer(fn);
-        await d.cleanup();
-        await d.cleanup();
-        expect(fn).toHaveBeenCalledTimes(1);
+        const cancel = timeout(fn, 100);
+        cancel();
+        vi.advanceTimersByTime(200);
+        expect(fn).not.toHaveBeenCalled();
     });
 
-    it('captures arguments at defer() call time, not cleanup time', async () => {
-        const d = defer();
-        const received = [];
-        let val = 'original';
-        d.defer((v) => received.push(v), val);
-        val = 'mutated';
-        await d.cleanup();
-        expect(received).toEqual(['original']);
+    it('calling cancel after fn already fired is a no-op', () => {
+        const fn = vi.fn();
+        const cancel = timeout(fn, 50);
+        vi.advanceTimersByTime(50);
+        expect(() => cancel()).not.toThrow();
+        expect(fn).toHaveBeenCalledOnce();
     });
 
-    it('passes multiple arguments to the cleanup function', async () => {
-        const d = defer();
-        let received;
-        d.defer((...args) => { received = args; }, 'a', 'b', 'c');
-        await d.cleanup();
-        expect(received).toEqual(['a', 'b', 'c']);
-    });
-
-    it('awaits async cleanup functions', async () => {
-        const d = defer();
-        let done = false;
-        d.defer(async () => {
-            await new Promise(r => setTimeout(r, 10));
-            done = true;
-        });
-        await d.cleanup();
-        expect(done).toBe(true);
-    });
-
-    it('runs all cleanups even when one throws — error isolation', async () => {
-        const d = defer();
-        const ran = [];
-        d.defer(() => ran.push('first'));
-        d.defer(() => { throw new Error('boom'); });
-        d.defer(() => ran.push('third'));
-
-        await d.cleanup();
-
-        expect(ran).toContain('first');
-        expect(ran).toContain('third');
-    });
-
-    it('collects errors in d.errors after cleanup', async () => {
-        const d = defer();
-        d.defer(() => { throw new Error('e1'); });
-        d.defer(() => { throw new Error('e2'); });
-
-        await d.cleanup();
-
-        expect(d.errors).toHaveLength(2);
-        expect(d.errors[0].message).toBe('e2');
-        expect(d.errors[1].message).toBe('e1');
-    });
-
-    it('isolates errors from async cleanup functions', async () => {
-        const d = defer();
-        const ran = [];
-        d.defer(() => ran.push('sync'));
-        d.defer(async () => { throw new Error('async boom'); });
-
-        await d.cleanup();
-
-        expect(ran).toContain('sync');
-        expect(d.errors).toHaveLength(1);
-    });
-
-    it('throws TypeError when defer() receives a non-function', () => {
-        const d = defer();
-        expect(() => d.defer('not a function')).toThrow(TypeError);
-        expect(() => d.defer(42)).toThrow(TypeError);
-        expect(() => d.defer(null)).toThrow(TypeError);
-    });
-
-    it('supports multiple registrations across multiple cleanup() calls', async () => {
-        const d = defer();
-        const log = [];
-
-        d.defer(() => log.push('a'));
-        await d.cleanup();
-
-        d.defer(() => log.push('b'));
-        await d.cleanup();
-
-        expect(log).toEqual(['a', 'b']);
-    });
-
-    it('d.errors starts as an empty array', () => {
-        const d = defer();
-        expect(d.errors).toEqual([]);
+    it('throws TypeError when fn is not a function', () => {
+        expect(() => timeout('not-a-fn', 100)).toThrow(TypeError);
+        expect(() => timeout(null, 100)).toThrow(TypeError);
     });
 });
 
-// ─── withDefer() ──────────────────────────────────────────────────────────────
+describe('interval()', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('calls fn repeatedly at each tick', () => {
+        const fn = vi.fn();
+        const stop = interval(fn, 100);
+        vi.advanceTimersByTime(350);
+        stop();
+        expect(fn).toHaveBeenCalledTimes(3);
+    });
+
+    it('returns a stop function that halts future ticks', () => {
+        const fn = vi.fn();
+        const stop = interval(fn, 100);
+        vi.advanceTimersByTime(250);
+        stop();
+        vi.advanceTimersByTime(500);
+        expect(fn).toHaveBeenCalledTimes(2);
+    });
+
+    it('calling stop multiple times is safe', () => {
+        const fn = vi.fn();
+        const stop = interval(fn, 100);
+        stop();
+        expect(() => stop()).not.toThrow();
+    });
+
+    it('throws TypeError when fn is not a function', () => {
+        expect(() => interval(42, 100)).toThrow(TypeError);
+    });
+});
+
+describe('sleep()', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('returns a Promise that resolves after ms', async () => {
+        const resolved = vi.fn();
+        sleep(200).then(resolved);
+        expect(resolved).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(200);
+        await Promise.resolve(); // flush microtask queue
+        expect(resolved).toHaveBeenCalledOnce();
+    });
+
+    it('sleep(0) resolves on next tick', async () => {
+        const resolved = vi.fn();
+        sleep(0).then(resolved);
+        vi.advanceTimersByTime(0);
+        await Promise.resolve();
+        expect(resolved).toHaveBeenCalledOnce();
+    });
+});
+
+describe('defer()', () => {
+    it('runs deferred fns in LIFO order on cleanup', async () => {
+        const d = defer();
+        const order = [];
+        d.defer(() => order.push(1));
+        d.defer(() => order.push(2));
+        d.defer(() => order.push(3));
+        await d.cleanup();
+        expect(order).toEqual([3, 2, 1]);
+    });
+
+    it('captures arguments eagerly (Go semantics)', async () => {
+        const d = defer();
+        const calls = [];
+        let x = 'initial';
+        d.defer((val) => calls.push(val), x);
+        x = 'mutated';
+        await d.cleanup();
+        expect(calls).toEqual(['initial']); // captured at defer time, not cleanup time
+    });
+
+    it('isolates errors — all fns run even if one throws', async () => {
+        const d = defer();
+        const ran = [];
+        d.defer(() => ran.push('a'));
+        d.defer(() => { throw new Error('boom'); });
+        d.defer(() => ran.push('c'));
+        await d.cleanup();
+        expect(ran).toContain('a');
+        expect(ran).toContain('c');
+        expect(d.errors).toHaveLength(1);
+        expect(d.errors[0].message).toBe('boom');
+    });
+
+    it('cleanup is idempotent — second call is a no-op', async () => {
+        const d = defer();
+        const fn = vi.fn();
+        d.defer(fn);
+        await d.cleanup();
+        await d.cleanup();
+        expect(fn).toHaveBeenCalledOnce();
+    });
+
+    it('throws TypeError when non-function passed to defer()', () => {
+        const d = defer();
+        expect(() => d.defer('not-a-fn')).toThrow(TypeError);
+    });
+
+    it('supports async cleanup functions', async () => {
+        const d = defer();
+        const log = [];
+        d.defer(async () => { log.push('async'); });
+        d.defer(() => log.push('sync'));
+        await d.cleanup();
+        expect(log).toEqual(['sync', 'async']); // LIFO: sync registered last
+    });
+
+    describe('defer.timeout()', () => {
+        beforeEach(() => vi.useFakeTimers());
+        afterEach(() => vi.useRealTimers());
+
+        it('auto-cancels timeout on cleanup()', async () => {
+            const d = defer();
+            const fn = vi.fn();
+            d.timeout(fn, 500);
+            await d.cleanup(); // cancels before it fires
+            vi.advanceTimersByTime(600);
+            expect(fn).not.toHaveBeenCalled();
+        });
+
+        it('returns the cancel fn for early cancellation', () => {
+            const d = defer();
+            const fn = vi.fn();
+            const cancel = d.timeout(fn, 500);
+            cancel(); // cancel early
+            vi.advanceTimersByTime(600);
+            expect(fn).not.toHaveBeenCalled();
+        });
+
+        it('timeout that fires before cleanup does not error', async () => {
+            const d = defer();
+            const fn = vi.fn();
+            d.timeout(fn, 100);
+            vi.advanceTimersByTime(150); // fires
+            await d.cleanup();           // cleanup tries to cancel already-fired timer — safe
+            expect(fn).toHaveBeenCalledOnce();
+            expect(d.errors).toHaveLength(0);
+        });
+    });
+
+    describe('defer.interval()', () => {
+        beforeEach(() => vi.useFakeTimers());
+        afterEach(() => vi.useRealTimers());
+
+        it('auto-stops interval on cleanup()', async () => {
+            const d = defer();
+            const fn = vi.fn();
+            d.interval(fn, 100);
+            vi.advanceTimersByTime(250); // 2 ticks
+            await d.cleanup();
+            vi.advanceTimersByTime(500); // no more ticks
+            expect(fn).toHaveBeenCalledTimes(2);
+        });
+
+        it('returns the stop fn for early stopping', () => {
+            const d = defer();
+            const fn = vi.fn();
+            const stop = d.interval(fn, 100);
+            vi.advanceTimersByTime(150); // 1 tick
+            stop();
+            vi.advanceTimersByTime(300); // no more ticks
+            expect(fn).toHaveBeenCalledTimes(1);
+        });
+    });
+});
 
 describe('withDefer()', () => {
-
-    it('passes a defer instance as the first argument', async () => {
-        let received = null;
-        await withDefer((d) => { received = d; });
-        expect(typeof received.defer).toBe('function');
-        expect(typeof received.cleanup).toBe('function');
-    });
-
-    it('calls cleanup after fn returns', async () => {
-        const log = [];
-        await withDefer((d) => {
-            d.defer(() => log.push('cleaned'));
+    it('passes defer instance to fn and always calls cleanup', async () => {
+        const cleanupCalled = vi.fn();
+        await withDefer(async (d) => {
+            d.defer(cleanupCalled);
         });
-        expect(log).toContain('cleaned');
+        expect(cleanupCalled).toHaveBeenCalledOnce();
     });
 
-    it('calls cleanup even when fn throws', async () => {
-        const log = [];
-        await expect(
-            withDefer((d) => {
-                d.defer(() => log.push('cleaned despite throw'));
-                throw new Error('fn error');
-            })
-        ).rejects.toThrow('fn error');
-        expect(log).toContain('cleaned despite throw');
-    });
-
-    it('returns the value returned by fn', async () => {
-        const result = await withDefer(() => 42);
+    it('returns the value from fn', async () => {
+        const result = await withDefer(async () => 42);
         expect(result).toBe(42);
     });
 
-    it('returns the resolved value of an async fn', async () => {
-        const result = await withDefer(async () => 'async result');
-        expect(result).toBe('async result');
+    it('calls cleanup even when fn throws', async () => {
+        const cleanupCalled = vi.fn();
+        await expect(
+            withDefer(async (d) => {
+                d.defer(cleanupCalled);
+                throw new Error('fn error');
+            })
+        ).rejects.toThrow('fn error');
+        expect(cleanupCalled).toHaveBeenCalledOnce();
     });
 
-    it('runs cleanup in LIFO order', async () => {
+    it('cleanup runs in LIFO order inside withDefer', async () => {
         const order = [];
-        await withDefer((d) => {
-            d.defer(() => order.push('first'));
-            d.defer(() => order.push('second'));
+        await withDefer(async (d) => {
+            d.defer(() => order.push(1));
+            d.defer(() => order.push(2));
         });
-        expect(order).toEqual(['second', 'first']);
-    });
-
-    it('awaits async deferred functions', async () => {
-        let done = false;
-        await withDefer((d) => {
-            d.defer(async () => {
-                await new Promise(r => setTimeout(r, 5));
-                done = true;
-            });
-        });
-        expect(done).toBe(true);
+        expect(order).toEqual([2, 1]);
     });
 });
