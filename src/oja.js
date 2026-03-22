@@ -50,6 +50,7 @@
  */
 
 // ─── Kernel ───────────────────────────────────────────────────────────────────
+export { timeout, interval, sleep, defer, withDefer }     from './js/core/system.js';
 export { Store }                                          from './js/core/store.js';
 export { state, effect, derived, batch, context }         from './js/core/reactive.js';
 export { render, renderRaw, fill, each, template }        from './js/core/template.js';
@@ -101,6 +102,7 @@ export {
 // ─── UI layer — js/ui/ ────────────────────────────────────────────────────────
 export { modal }                                          from './js/ui/modal.js';
 export { notify }                                         from './js/ui/notify.js';
+export { clipboard }                                      from './js/ui/clipboard.js';
 export { form }                                           from './js/ui/form.js';
 export { validate }                                       from './js/ui/validate.js';
 export { autocomplete }                                   from './js/ui/autocomplete.js';
@@ -138,6 +140,7 @@ export { events, register, strictMode, isRegistered, getRegistered }
 export const VERSION = '0.0.1';
 
 // ─── Grouped exports — one import, dot-access ─────────────────────────────────
+import { timeout, interval, sleep, defer, withDefer }                from './js/core/system.js';
 import { state, effect, derived, batch, context }                    from './js/core/reactive.js';
 import { on, once, off, emit, listen, listenOnce, waitFor,
     debounce, throttle, rafThrottle, keys,
@@ -161,6 +164,7 @@ import { layout }                                                     from './js
 import { segment }                                                    from './js/core/segment.js';
 import { modal }                                                      from './js/ui/modal.js';
 import { notify }                                                     from './js/ui/notify.js';
+import { clipboard }                                                  from './js/ui/clipboard.js';
 import { animate }                                                    from './js/core/animate.js';
 import { form }                                                        from './js/ui/form.js';
 import { validate }                                                    from './js/ui/validate.js';
@@ -209,7 +213,7 @@ export const Oja = {
     // Codecs
     JsonCodec, jsonCodec, MsgPackCodec,
     // UI
-    Router, component, layout, segment, modal, notify, animate,
+    Router, component, layout, segment, modal, notify, clipboard, animate,
     ui, find, findAll, findAllIn,
     createEl, empty, removeEl,
     afterEl, beforeEl, toggleEl,
@@ -230,6 +234,8 @@ export const Oja = {
     Runner, VFS,
     // Utils
     encrypt, logger, debug, adapter,
+    // System
+    timeout, interval, sleep, defer, withDefer,
     // Plugin
     plugin,
     // Version
