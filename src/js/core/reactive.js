@@ -50,6 +50,18 @@
  *       key: 'app-theme' // custom storage key (optional)
  *   });
  *
+ *   // onQuotaExceeded — called when localStorage is full (default: silent warn + event)
+ *   const [notes, setNotes] = context.persist('notes', {}, {
+ *       onQuotaExceeded: (key, value, err) => {
+ *           notify.warn('Storage full — export your data to free space');
+ *           emit('storage:quota-exceeded', { key });
+ *       }
+ *   });
+ *   // Also available as a global window event for centralised handling:
+ *   window.addEventListener('oja:quota-exceeded', ({ detail }) => {
+ *       console.warn('Quota hit for key:', detail.key);
+ *   });
+ *
  *   // Require — throws clearly if the key was never registered.
  *   // Use in components to catch key typos or incorrect load order.
  *   const [activeFile, setActiveFile] = context.require('active_file');
@@ -131,7 +143,7 @@ class ReactiveSystem {
         }
     }
 
-    _savePersistent(key, storage, value) {
+    _savePersistent(key, storage, value, onQuotaExceeded = null) {
         const storageImpl = _getStorage(storage);
         if (!storageImpl || !_isStorageAvailable(storageImpl)) return;
 
@@ -139,7 +151,25 @@ class ReactiveSystem {
             storageImpl.setItem(key, JSON.stringify(value));
             this._sendDevToolsUpdate('persistence:saved', {key, storage});
         } catch (e) {
-            console.warn(`[oja/reactive] Failed to persist to ${storage}:`, e);
+            const isQuota = e.name === 'QuotaExceededError' ||
+                            e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+                            e.code === 22;
+            if (isQuota) {
+                console.warn(`[oja/reactive] Storage quota exceeded for key "${key}"`, e);
+                // Call per-key handler if provided
+                if (typeof onQuotaExceeded === 'function') {
+                    try { onQuotaExceeded(key, value, e); } catch (_) {}
+                }
+                // Always emit global event so the app can react centrally
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('oja:quota-exceeded', {
+                        detail: { key, storage, value, error: e },
+                        bubbles: false,
+                    }));
+                }
+            } else {
+                console.warn(`[oja/reactive] Failed to persist to ${storage}:`, e);
+            }
         }
     }
 
@@ -277,13 +307,18 @@ class ReactiveSystem {
     }
 
     persistentState(initialValue, name, options = {}) {
-        const {store = 'local', key = `oja:${name}`} = options;
+        const {
+            store            = 'local',
+            key              = `oja:${name}`,
+            onQuotaExceeded  = null,
+        } = options;
         const savedValue = this._loadPersistent(key, store, initialValue);
 
         const [read, write] = this._createState(savedValue, name, {
             key,
             storage: store,
-            defaultValue: initialValue
+            defaultValue: initialValue,
+            onQuotaExceeded,
         });
 
         if (store === 'local' && typeof window !== 'undefined') {
@@ -332,7 +367,7 @@ class ReactiveSystem {
             value = newValue;
 
             if (persistent) {
-                this._savePersistent(persistent.key, persistent.storage, value);
+                this._savePersistent(persistent.key, persistent.storage, value, persistent.onQuotaExceeded ?? null);
             }
 
             this._trackState(id, name, value, initialValue, persistent);
@@ -366,7 +401,7 @@ class ReactiveSystem {
 
         const persistent = this._persistentStates.get(id);
         if (persistent) {
-            this._savePersistent(persistent.key, persistent.storage, newValue);
+            this._savePersistent(persistent.key, persistent.storage, newValue, persistent.onQuotaExceeded ?? null);
         }
 
         if (!skipBatch) {
