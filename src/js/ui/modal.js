@@ -37,6 +37,12 @@
  *       body: Out.c('components/host-detail.html', hostData)
  *   });
  *
+ *   // Plain HTML strings are also accepted — auto-wrapped as Out.html():
+ *   // Note: Experimental, Out is the primary display primitive
+ *   modal.open('alertModal', {
+ *       body: '<p>Are you sure you want to delete this?</p>'
+ *   });
+ *
  * ─── HTML convention ──────────────────────────────────────────────────────────
  *
  *   <!-- Oja looks for [data-modal-body] inside the modal to render Outs -->
@@ -218,11 +224,18 @@ export const modal = {
         if (data.body && Out.is(data.body)) {
             const bodyEl = el.querySelector('[data-modal-body]');
             if (bodyEl) data.body.render(bodyEl, data);
+        } else if (typeof data.body === 'string') {
+            // Convenience: plain HTML strings are auto-wrapped as Out.html()
+            const bodyEl = el.querySelector('[data-modal-body]');
+            if (bodyEl) Out.html(data.body).render(bodyEl, data);
         }
 
         if (data.footer && Out.is(data.footer)) {
             const footerEl = el.querySelector('[data-modal-footer]');
             if (footerEl) data.footer.render(footerEl, data);
+        } else if (typeof data.footer === 'string') {
+            const footerEl = el.querySelector('[data-modal-footer]');
+            if (footerEl) Out.html(data.footer).render(footerEl, data);
         }
 
         if (Object.keys(data).length > 0) _fillModal(el, data);
