@@ -1341,6 +1341,177 @@ export const form = {
         if (!el) return null;
         return autocomplete.attach(el, options);
     },
+
+    // ─── Slider ───────────────────────────────────────────────────────────────
+    //
+    // Reactive range slider with value label. Wraps <input type="range"> with
+    // consistent styling and change/input callbacks.
+    //
+    //   form.slider('#opacity-slider', {
+    //       min:      0,
+    //       max:      100,
+    //       step:     1,
+    //       value:    80,
+    //       label:    (v) => `${v}%`,    // custom label fn (optional)
+    //       onChange: (v) => setOpacity(v / 100),  // fires on change (pointer up)
+    //       onInput:  (v) => setOpacity(v / 100),  // fires on every move
+    //   });
+    //
+    slider(target, options = {}) {
+        const container = _resolve(target);
+        if (!container) return null;
+
+        const {
+            min      = 0,
+            max      = 100,
+            step     = 1,
+            value    = 50,
+            label    = null,
+            onChange = null,
+            onInput  = null,
+        } = options;
+
+        // Build widget
+        const input = document.createElement('input');
+        input.type  = 'range';
+        input.min   = min;
+        input.max   = max;
+        input.step  = step;
+        input.value = value;
+        input.className = 'oja-slider';
+
+        const labelEl = document.createElement('span');
+        labelEl.className = 'oja-slider-label';
+
+        const wrap = document.createElement('div');
+        wrap.className = 'oja-slider-wrap';
+        wrap.appendChild(input);
+        wrap.appendChild(labelEl);
+
+        container.innerHTML = '';
+        container.appendChild(wrap);
+
+        const updateLabel = (v) => {
+            labelEl.textContent = label ? label(v) : String(v);
+        };
+        updateLabel(Number(value));
+
+        input.addEventListener('input', () => {
+            const v = Number(input.value);
+            updateLabel(v);
+            if (onInput) onInput(v);
+        });
+        input.addEventListener('change', () => {
+            if (onChange) onChange(Number(input.value));
+        });
+
+        return {
+            getValue: ()  => Number(input.value),
+            setValue: (v) => { input.value = v; updateLabel(Number(v)); },
+            destroy:  ()  => container.innerHTML = '',
+        };
+    },
+
+    // ─── Color picker ─────────────────────────────────────────────────────────
+    //
+    // Enhanced color input with swatch palette and optional alpha channel.
+    // Falls back gracefully to native <input type="color"> on unsupported browsers.
+    //
+    //   form.colorPicker('#fill-color', {
+    //       value:    '#3b82f6',
+    //       alpha:    false,
+    //       swatches: ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6'],
+    //       onChange: (hex) => setFill(hex),
+    //       onInput:  (hex) => previewFill(hex),
+    //   });
+    //
+    colorPicker(target, options = {}) {
+        const container = _resolve(target);
+        if (!container) return null;
+
+        const {
+            value    = '#000000',
+            alpha    = false,
+            swatches = [],
+            onChange = null,
+            onInput  = null,
+        } = options;
+
+        const input = document.createElement('input');
+        input.type  = 'color';
+        input.value = value.slice(0, 7); // native color input only takes #rrggbb
+        input.className = 'oja-color-input';
+
+        const preview = document.createElement('div');
+        preview.className = 'oja-color-preview';
+        preview.style.background = value;
+
+        const swatchRow = document.createElement('div');
+        swatchRow.className = 'oja-color-swatches';
+
+        swatches.forEach(sw => {
+            const btn = document.createElement('button');
+            btn.className = 'oja-color-swatch';
+            btn.style.background = sw;
+            btn.title = sw;
+            btn.type  = 'button';
+            btn.addEventListener('click', () => {
+                input.value       = sw.slice(0, 7);
+                preview.style.background = sw;
+                if (onChange) onChange(sw);
+            });
+            swatchRow.appendChild(btn);
+        });
+
+        const wrap = document.createElement('div');
+        wrap.className = 'oja-color-wrap';
+        wrap.appendChild(preview);
+        wrap.appendChild(input);
+        if (swatches.length) wrap.appendChild(swatchRow);
+
+        // Alpha channel (opacity slider)
+        let alphaSlider = null;
+        let _alpha = 1;
+        if (alpha) {
+            alphaSlider = document.createElement('input');
+            alphaSlider.type      = 'range';
+            alphaSlider.min       = 0;
+            alphaSlider.max       = 100;
+            alphaSlider.step      = 1;
+            alphaSlider.value     = 100;
+            alphaSlider.className = 'oja-color-alpha';
+            alphaSlider.title     = 'Opacity';
+            wrap.appendChild(alphaSlider);
+            alphaSlider.addEventListener('input', () => {
+                _alpha = Number(alphaSlider.value) / 100;
+                preview.style.opacity = _alpha;
+                if (onInput) onInput(_currentValue(), _alpha);
+            });
+        }
+
+        function _currentValue() { return input.value; }
+
+        // Click preview to open native picker
+        preview.addEventListener('click', () => input.click());
+
+        input.addEventListener('input', () => {
+            preview.style.background = input.value;
+            if (onInput) onInput(input.value, _alpha);
+        });
+        input.addEventListener('change', () => {
+            if (onChange) onChange(input.value, _alpha);
+        });
+
+        container.innerHTML = '';
+        container.appendChild(wrap);
+
+        return {
+            getValue:   ()    => ({ color: input.value, alpha: _alpha }),
+            setValue:   (hex) => { input.value = hex.slice(0,7); preview.style.background = hex; },
+            setAlpha:   (a)   => { _alpha = a; if (alphaSlider) { alphaSlider.value = Math.round(a * 100); preview.style.opacity = a; } },
+            destroy:    ()    => container.innerHTML = '',
+        };
+    },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
