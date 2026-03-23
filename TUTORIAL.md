@@ -6,7 +6,8 @@ exactly when it is needed, so you never learn something in the abstract.
 
 By the end you will know how to use every core primitive:
 `state`, `effect`, `context`, `derived`, `batch`, routing, components,
-layouts, forms, modals, keyboard shortcuts, and auth guards.
+layouts, forms, modals, keyboard shortcuts, auth guards, the engine,
+search, tables, VFS, and config.
 
 No build step. No compiler. Just files.
 
@@ -14,21 +15,50 @@ No build step. No compiler. Just files.
 
 ## Before you start
 
-Serve the project from a local HTTP server — browsers block ES module imports
-from `file://`. Any of these work:
+### Get Oja
+
+No install needed. Add a stylesheet link and an import map to `index.html` —
+that is all. The import map goes in `index.html` once. Every script on the
+page, including the inline scripts inside your component `.html` files, can
+then use the bare `@agberohq/oja` specifier. You do not repeat it anywhere else.
+
+```html
+<head>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.min.css">
+
+    <script type="importmap">
+    {
+        "imports": {
+            "@agberohq/oja": "https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js"
+        }
+    }
+    </script>
+</head>
+```
+
+If you already use npm in your project and prefer to manage Oja as a local
+dependency, `npm install @agberohq/oja` and point the import map at
+`./node_modules/@agberohq/oja/build/oja.full.esm.js` instead. Everything else
+is identical.
+
+All examples in this tutorial use `from '@agberohq/oja'`.
+
+### Serve the project
+
+Browsers block ES module imports from `file://`. Serve the project from a
+local HTTP server — any of these work:
 
 ```bash
-agbero serve . --port 3000 
-#or
-agbero serve . --port 3000 --https # (requires installation)
-#or
+agbero serve . --port 3000
+# or
+agbero serve . --port 3000 --https  # (requires installation)
+# or
 npx serve .
 # or
 python3 -m http.server 3000
 # or
 npx vite --open   # if you prefer Vite's dev server
 ```
-
 
 Then open `http://localhost:3000`.
 
@@ -54,7 +84,10 @@ my-app/
 <head>
     <meta charset="UTF-8">
     <title>My App</title>
-    <link rel="stylesheet" href="oja.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.min.css">
+    <script type="importmap">
+    { "imports": { "@agberohq/oja": "https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js" } }
+    </script>
 </head>
 <body>
 <div id="app"></div>
@@ -66,7 +99,7 @@ my-app/
 **app.js**
 
 ```js
-import { state, effect } from './build/oja.core.esm.js';
+import { state, effect } from '@agberohq/oja';
 
 const [count, setCount] = state(0);
 
@@ -175,11 +208,11 @@ can read or write it and effects update automatically.
 
 ```js
 // app.js — create once
-import { context } from './build/oja.core.esm.js';
+import { context } from '@agberohq/oja';
 export const [currentUser, setCurrentUser] = context('user', null);
 
 // profile.html — read anywhere
-import { context } from '../../build/oja.core.esm.js';
+import { context } from '@agberohq/oja';
 const [currentUser] = context('user'); // same pair, no initial value needed
 ```
 
@@ -204,7 +237,7 @@ Once an app grows past one page, organise it like this:
 
 ```
 my-app/
-  index.html          ← shell HTML, loads app.js
+  index.html          ← shell HTML, loads app.js — import map lives here
   app.js              ← context + router + global events
   layouts/
     main.html         ← persistent shell (nav, sidebar, outlet)
@@ -229,7 +262,7 @@ Oja does not enforce this structure. It is simply the pattern that scales well.
 ### Basic setup
 
 ```js
-import { Router, Out } from './build/oja.core.esm.js';
+import { Router, Out } from '@agberohq/oja';
 
 const router = new Router({ mode: 'hash', outlet: '#main-outlet' });
 
@@ -306,7 +339,7 @@ while routes change inside it.
 **app.js** — apply the layout before starting the router:
 
 ```js
-import { layout, Router, Out } from './build/oja.core.esm.js';
+import { layout, Router, Out } from '@agberohq/oja';
 
 // await is required — the router outlet lives inside the layout
 await layout.apply('#app', 'layouts/main.html', {
@@ -372,7 +405,7 @@ const btn = find('#submit');
 
 ```js
 // pages/tasks.html script:
-import { component } from '../../build/oja.core.esm.js';
+import { component } from '@agberohq/oja';
 
 const listEl = find('#task-list');
 
@@ -412,6 +445,25 @@ Inside the HTML markup (not the script), use `{{variable}}` syntax:
 </div>
 ```
 
+### Rendering into an element
+
+Oja extends every DOM element it touches with a `.render()` method that accepts
+any `Out` responder. This lets you surgically update one part of a mounted
+component without re-mounting the whole thing:
+
+```js
+const panelEl = find('#details-panel');
+
+// Replace the panel's contents with a component
+panelEl.render(Out.component('components/detail.html', { item }));
+
+// Or with inline HTML
+panelEl.render(Out.html(`<p>Updated at ${new Date().toLocaleTimeString()}</p>`));
+```
+
+This is the same mechanism `modal.open()` uses for its `body` option — it calls
+`.render()` on the `[data-modal-body]` slot internally.
+
 ---
 
 ## Part 8 — Forms
@@ -419,7 +471,7 @@ Inside the HTML markup (not the script), use `{{variable}}` syntax:
 `form.on()` handles the full lifecycle in one call:
 
 ```js
-import { form, notify } from '../../build/oja.core.esm.js';
+import { form, notify } from '@agberohq/oja';
 
 const formEl = find('#task-form');
 
@@ -446,6 +498,26 @@ Throw to trigger `error`. Return a value to trigger `success`.
 The string `'validation'` is a sentinel — use it to prevent double-notifying
 when `form.validate()` has already shown inline field errors.
 
+### Dirty tracking — detecting unsaved changes
+
+For the task board's edit form, you want to warn the user if they navigate
+away with unsaved changes. `form.dirty()` watches the form and fires a callback
+whenever any field's dirty state changes:
+
+```js
+const stop = form.dirty(formEl, (field, isDirty) => {
+    find('#save-btn').disabled = !isDirty;
+});
+
+// Stop watching when the component unmounts
+component.onUnmount(() => stop());
+```
+
+The callback receives the field name and whether it is now dirty relative to
+its value when `form.dirty()` was first called. You can reset the baseline at
+any time — for example after a successful save — by calling
+`form.resetDirty(formEl)`.
+
 ### Image preview
 
 ```js
@@ -461,7 +533,7 @@ One line replaces the manual `FileReader` dance.
 ## Part 9 — Notifications
 
 ```js
-import { notify } from '../../build/oja.core.esm.js';
+import { notify } from '@agberohq/oja';
 
 notify.success('Task saved!');
 notify.error('Something went wrong');
@@ -478,12 +550,31 @@ Position is set once in `app.js`:
 notify.setPosition('bottom-right'); // default: top-right
 ```
 
+### Banners — persistent full-width messages
+
+Toasts disappear on their own. Banners stay until you dismiss them. Use them
+for things the user must not miss — a lost connection, a background job still
+running, or a warning that is not tied to any single action:
+
+```js
+// Show a banner when the app loses its server connection
+notify.banner('⚠️ Connection lost — retrying…', { type: 'warn' });
+
+// Dismiss it once the connection is restored
+notify.dismissBanner();
+
+// The message accepts an Out responder — useful when you need a link inside the banner
+notify.banner(Out.html('⚠️ Maintenance in 5 minutes. <a href="#/status">Details</a>'), {
+    type: 'warn',
+});
+```
+
 ---
 
 ## Part 10 — Keyboard shortcuts
 
 ```js
-import { keys } from './build/oja.core.esm.js';
+import { keys } from '@agberohq/oja';
 
 keys({
     'n':   () => openNewTaskModal(),
@@ -517,7 +608,7 @@ Declare the modal shell in `index.html`:
 Open and close from anywhere:
 
 ```js
-import { modal, Out } from './build/oja.core.esm.js';
+import { modal, Out } from '@agberohq/oja';
 
 // Open — body is any Out responder
 modal.open('task-modal', {
@@ -542,7 +633,7 @@ Channels are Go-style pipes for coordinating async work without callbacks.
 They shine when you have a producer and a consumer that should run independently.
 
 ```js
-import { Channel, go } from './build/oja.core.esm.js';
+import { Channel, go } from '@agberohq/oja';
 
 const uploads = new Channel(5); // buffered, holds up to 5 items
 
@@ -572,7 +663,7 @@ thing that processes it.
 ## Part 13 — Auth
 
 ```js
-import { auth, context } from './build/oja.core.esm.js';
+import { auth, context } from '@agberohq/oja';
 
 export const [currentUser, setCurrentUser] = context('user', null);
 
@@ -622,7 +713,7 @@ in the order Oja expects it.
 import {
     Router, Out, layout, modal,
     context, auth, notify, on, keys,
-} from './build/oja.core.esm.js';
+} from '@agberohq/oja';
 
 // ── 1. Global context ─────────────────────────────────────────────────────
 export const [currentUser, setCurrentUser] = context('user', null);
@@ -703,6 +794,7 @@ router.start('/');
 | `document.getElementById` inside a component | May grab an element from another component instance | Use `find('#id')` — it is scoped to the current component |
 | Declaring `router` after `auth.session.OnStart` | `ReferenceError: Cannot access 'router' before initialization` | Declare `router` before any auth session callbacks |
 | `go()` return value | `go()` returns `undefined` — it is fire-and-forget | Use a flag or a Channel to observe completion |
+| Missing `<script type="importmap">` in `index.html` | `Failed to resolve module specifier "@agberohq/oja"` in the browser console | Add the import map to `index.html` — it only needs to be there once and covers every script on the page |
 
 ---
 
@@ -715,7 +807,7 @@ VFS is entirely optional. Everything in Parts 1–14 works without it.
 ### Basic setup
 
 ```js
-import { VFS, Router, Out } from './build/oja.core.esm.js';
+import { VFS, Router, Out } from '@agberohq/oja';
 
 const vfs = new VFS('my-app');
 await vfs.ready();
@@ -840,7 +932,7 @@ Place this file at the root of your app (same directory as `index.html`).
 ### Loading config
 
 ```js
-import { config } from './build/oja.core.esm.js';
+import { config } from '@agberohq/oja';
 
 // Load from the same directory as app.js
 await config.load();
@@ -859,7 +951,7 @@ if (config.loaded) {
 ### Applying config
 
 ```js
-import { config, VFS, Router, auth } from './build/oja.core.esm.js';
+import { config, VFS, Router, auth } from '@agberohq/oja';
 
 await config.load();
 
@@ -897,6 +989,7 @@ router.start('/');
 ```
 
 Config is progressive enhancement. Start without it. Add it when your app needs centralised configuration.
+
 ---
 
 ## Part 17 — Engine: smart DOM updates
@@ -916,7 +1009,7 @@ reactive state, call `engine.useStore(store)` once in `app.js`, before any
 routes are registered:
 
 ```js
-import { engine, Store } from './build/oja.core.esm.js';
+import { engine, Store } from '@agberohq/oja';
 
 const store = new Store('taskboard');
 engine.useStore(store);
@@ -948,7 +1041,7 @@ the same thing with `engine.list()`:
 
 ```js
 // pages/tasks.html — after
-import { engine, component } from '../../build/oja.core.esm.js';
+import { engine, component } from '@agberohq/oja';
 
 const listEl = find('#task-list');
 
@@ -986,7 +1079,7 @@ inputs. With `engine.morph()`:
 
 ```js
 // pages/profile.html
-import { engine, component } from '../../build/oja.core.esm.js';
+import { engine, component } from '@agberohq/oja';
 
 async function refreshStats() {
     const stats = await api.get('/me/stats');
@@ -1036,7 +1129,7 @@ With the engine wired to the store, you can express this in HTML instead:
 
 ```js
 // app.js — write the store key whenever tasks change
-import { engine } from './build/oja.core.esm.js';
+import { engine } from '@agberohq/oja';
 
 effect(() => {
     engine.set('task.count', tasks().length);
@@ -1068,7 +1161,7 @@ adds tag autocomplete on the task form.
 
 ```js
 // app.js — build the index once, update it when tasks change
-import { Search } from './build/oja.core.esm.js';
+import { Search } from '@agberohq/oja';
 
 export const taskSearch = new Search([], {
     fields:  ['text', 'tag'],
@@ -1089,8 +1182,8 @@ and removing tasks all flow through the same path.
 
 ```js
 // pages/tasks.html
-import { on, engine }     from '../../build/oja.core.esm.js';
-import { taskSearch }     from '../../app.js';
+import { on, engine }  from '@agberohq/oja';
+import { taskSearch }  from '../../app.js';
 
 const searchEl = find('#task-search');
 const listEl   = find('#task-list');
@@ -1129,8 +1222,8 @@ and attach autocomplete to it:
 
 ```js
 // components/task-form.html
-import { Trie, form } from '../../build/oja.core.esm.js';
-import { tasks }      from '../../app.js';
+import { Trie, form, autocomplete, component } from '@agberohq/oja';
+import { tasks } from '../../app.js';
 
 // Build a trie of every tag already in use
 const tagTrie = new Trie();
@@ -1141,7 +1234,6 @@ for (const t of tasks()) {
 const tagInput = find('#task-tag');
 
 // Path A — standalone
-import { autocomplete } from '../../build/oja.core.esm.js';
 const handle = autocomplete.attach(tagInput, {
     source:   tagTrie,
     limit:    6,
@@ -1156,7 +1248,6 @@ const handle = form.input(tagInput, {
 });
 
 // Clean up when the component unmounts
-import { component } from '../../build/oja.core.esm.js';
 component.onUnmount(() => handle.destroy());
 ```
 
@@ -1196,7 +1287,7 @@ adds all of this in one call without replacing the data flow you already have.
 
 ```js
 // pages/tasks.html
-import { table } from '../../build/oja.full.esm.js';
+import { table } from '@agberohq/oja';
 
 const headers = [
     { key: 'text',   label: 'Task',   sortable: true  },

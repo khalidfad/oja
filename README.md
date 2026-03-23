@@ -7,7 +7,6 @@
 
 
 
-
 <p align="left">
   <img src="assets/oja_name.png" width="70" alt="Agbero Logo">
 </p>
@@ -57,34 +56,41 @@ No package manager required. Three ways to use Oja:
 
 ### Option 1 — CDN (recommended)
 
-Include Oja directly from jsDelivr — no install, no build step.
+Drop in a link and an import map. No install, no build step, no node_modules.
 
 ```html
-<!-- CSS -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.min.css">
 
-<!-- ESM — recommended for modern apps -->
-<script type="module">
-    import { Router, Out, state, effect } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+<script type="importmap">
+{
+    "imports": {
+        "@agberohq/oja": "https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js"
+    }
+}
 </script>
-
-<!-- IIFE — Oja available as window.Oja -->
-<script src="https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.min.js"></script>
 ```
+
+The import map goes in `index.html` once. Every script on the page — including
+inline scripts inside your component `.html` files — can then use the bare
+`@agberohq/oja` specifier directly.
 
 Pin to a specific version in production:
 
 ```html
-<script type="module">
-    import { Router, Out, state, effect } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@0.0.6/build/oja.core.esm.js';
+<script type="importmap">
+{
+    "imports": {
+        "@agberohq/oja": "https://cdn.jsdelivr.net/npm/@agberohq/oja@0.0.11/build/oja.full.esm.js"
+    }
+}
 </script>
 ```
 
-For extensions (WebSocket, Worker, WASM, Canvas, drag-and-drop, etc.) use the full build:
+Or import directly from the URL without an import map:
 
 ```html
 <script type="module">
-    import { OjaSocket, OjaWorker, dragdrop, Channel } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js';
+    import { state, effect } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js';
 </script>
 ```
 
@@ -101,7 +107,7 @@ npm install --save-dev esbuild clean-css-cli
 
 **Build:**
 ```bash
-make          # builds everything → build/oja.core.min.js + build/oja.min.css
+make          # builds everything → build/oja.full.esm.js + build/oja.min.css
 make watch    # rebuild on save during development
 make check    # show output sizes
 make clean    # remove build/
@@ -111,19 +117,13 @@ make clean    # remove build/
 ```html
 <link rel="stylesheet" href="../oja/build/oja.min.css">
 
-<!-- ESM -->
-<script type="module">
-    import { Router, Out, state, effect } from '../oja/build/oja.core.esm.js';
+<script type="importmap">
+{
+    "imports": {
+        "@agberohq/oja": "../oja/build/oja.full.esm.js"
+    }
+}
 </script>
-
-<!-- IIFE — Oja available as window.Oja -->
-<script src="../oja/build/oja.core.min.js"></script>
-```
-
-```js
-// IIFE — destructure from the global
-const { Router, Out, auth, notify, component,
-    state, effect, Channel, go } = Oja;
 ```
 
 ---
@@ -146,10 +146,44 @@ my-project/
 ```js
 // app.js — import from the barrel
 import { Router, Out, auth, notify, component } from '../oja/src/oja.js';
-
-// Extensions (SSE, WebSocket, Worker, WASM, drag-and-drop, etc.)
-import { OjaSSE, OjaWorker, dragdrop } from '../oja/src/oja.full.js';
 ```
+
+---
+
+### Option 4 — npm (if you already use a package.json)
+
+If your project already uses npm for other dependencies, you can manage Oja the same way:
+
+```bash
+npm install @agberohq/oja
+```
+
+Then point the import map at `node_modules` instead of a CDN:
+
+```html
+<link rel="stylesheet" href="./node_modules/@agberohq/oja/build/oja.min.css">
+
+<script type="importmap">
+{
+    "imports": {
+        "@agberohq/oja": "./node_modules/@agberohq/oja/build/oja.full.esm.js"
+    }
+}
+</script>
+```
+
+Everything else is identical — the import map goes in `index.html` once, all files use `@agberohq/oja`.
+
+---
+
+## Build variants
+
+| File | Contains | Use when |
+|------|----------|----------|
+| `oja.full.esm.js` | Everything | Default — the import map examples above all point here |
+| `oja.core.esm.js` | Core only (no WebSocket, Worker, WASM, canvas, drag-and-drop) | Size-sensitive production apps |
+| `oja.core.min.js` | Core IIFE — `window.Oja` | Legacy scripts, no ES module support |
+| `oja.min.css` | Oja UI components (toasts, modals, drawers, tables) | Always include alongside any build |
 
 ---
 
@@ -158,7 +192,7 @@ import { OjaSSE, OjaWorker, dragdrop } from '../oja/src/oja.full.js';
 When you want a clean namespace without listing every name, import a group object:
 
 ```js
-import { Reactive, Event, DOM } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { Reactive, Event, DOM } from '@agberohq/oja';
 
 // Reactivity
 const [count, setCount] = Reactive.state(0);
@@ -177,7 +211,7 @@ DOM.createEl('div', { class: 'card' });
 Or import everything under the `Oja` namespace:
 
 ```js
-import { Oja } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { Oja } from '@agberohq/oja';
 
 Oja.state(0)
 Oja.Router
@@ -194,7 +228,7 @@ Oja.Event.on('.btn', 'click', handler)
 `Out` is how Oja produces every piece of visible output. There are no raw HTML strings, no ad-hoc `innerHTML`, no inconsistent rendering paths. One primitive, composable everywhere.
 
 ```js
-import { Out } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { Out } from '@agberohq/oja';
 
 // Render a component file with data
 Out.component('pages/dashboard.html', { user, metrics })
@@ -244,6 +278,19 @@ Out.fn(async (container, ctx) => {
 
 `Out` is accepted wherever Oja produces visible output: router, modal, notify, component, template `each()`.
 
+#### Rendering into a DOM element
+
+Oja extends every DOM element it touches with a `.render()` method that accepts
+any `Out` responder. This lets you update part of a mounted component without
+re-mounting the whole thing:
+
+```js
+// Inside a component script
+const panelEl = find('#details-panel');
+panelEl.render(Out.component('components/detail.html', { item }));
+panelEl.render(Out.html('<p>Updated</p>'));
+```
+
 ### 2. Components are plain HTML files
 
 ```html
@@ -286,7 +333,7 @@ When Oja mounts a component, the inline script automatically receives `container
 ### 4. Reactive state — fine-grained, no virtual DOM
 
 ```js
-import { state, effect, derived, batch, context } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { state, effect, derived, batch, context } from '@agberohq/oja';
 
 const [metrics, setMetrics] = state(null);
 const [history, setHistory] = state([]);
@@ -312,7 +359,7 @@ export const [isOnline, setOnline] = context('isOnline', true);
 ### 5. Router — Go-style middleware and groups
 
 ```js
-import { Router, Out, auth } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { Router, Out, auth } from '@agberohq/oja';
 
 const router = new Router({
     mode    : 'hash',
@@ -385,7 +432,7 @@ await auth.session.start(responseToken);
 ### 7. Layout — persistent shell with slot injection
 
 ```js
-import { layout } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { layout } from '@agberohq/oja';
 
 // Define a persistent shell — survives navigation, renders once
 const shell = layout('components/nav.html', {
@@ -462,11 +509,14 @@ Oja supports two styles — mix freely:
 |--------|---------|--------|
 | `upper` | `{{name \| upper}}` | `ALICE` |
 | `lower` | `{{name \| lower}}` | `alice` |
+| `title` | `{{name \| title}}` | `Alice Smith` |
 | `bytes` | `{{size \| bytes}}` | `1.4 MB` |
 | `date`  | `{{ts \| date}}` | `18/03/2026` |
+| `time`  | `{{ts \| time}}` | `14:32:01` |
 | `ago`   | `{{ts \| ago}}` | `5m ago` |
 | `default` | `{{val \| default "n/a"}}` | `n/a` |
 | `trunc` | `{{text \| trunc 50}}` | `Long text…` |
+| `json`  | `{{obj \| json}}` | `{"key":"val"}` |
 
 ---
 
@@ -475,7 +525,7 @@ Oja supports two styles — mix freely:
 ### Store — persistent state with cascade
 
 ```js
-import { Store } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { Store } from '@agberohq/oja';
 
 const store  = new Store('myapp');                        // session storage
 const secure = new Store('myapp', { encrypt: true });     // AES-GCM encrypted
@@ -487,6 +537,9 @@ store.get('page', 'dashboard');   // with fallback
 store.has('page');
 store.clear('page');
 store.all();
+store.merge('settings', { theme: 'dark' }); // shallow merge into object value
+store.push('log', entry);                   // append to array value
+store.increment('count', 1);               // numeric increment
 
 // Async API — used automatically when encrypt:true
 await secure.set('token', jwt);
@@ -498,10 +551,12 @@ store.onChange('theme', (newVal, oldVal) => applyTheme(newVal));
 
 Storage cascade: `sessionStorage → localStorage → memory`. Same code works on web, mobile webview, and private browsing.
 
+---
+
 ### encrypt — standalone Web Crypto
 
 ```js
-import { encrypt } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { encrypt } from '@agberohq/oja';
 
 // Encrypt / decrypt
 const ct = await encrypt.seal('my secret', 'passphrase', 'salt');
@@ -520,12 +575,14 @@ if (encrypt.available()) { ... }
 
 `encrypt` is separate from `Store` — import it anywhere: VFS, auth, your own modules.
 
+---
+
 ### VFS — offline-first virtual filesystem
 
 VFS stores your app's files in IndexedDB, backed by a background Worker. Components load from VFS first, network second. Works offline after the first visit.
 
 ```js
-import { VFS, Out, Router } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { VFS, Out, Router } from '@agberohq/oja';
 
 const vfs = new VFS('my-app');
 await vfs.ready();
@@ -588,6 +645,8 @@ const vfs = new VFS('my-app', {
 }
 ```
 
+---
+
 ### config — optional project configuration
 
 `oja.config.json` is the optional single source of truth for an Oja project — like `package.json` is to Node. Everything works without it.
@@ -616,7 +675,7 @@ const vfs = new VFS('my-app', {
 ```
 
 ```js
-import { config, VFS, Router } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { config, VFS, Router } from '@agberohq/oja';
 
 // Load once in app.js
 await config.load();                  // looks for ./oja.config.json
@@ -636,32 +695,15 @@ config.applyRouter(router, { auth });
 router.start('/');
 ```
 
-A complete `app.js` with config:
-```js
-import { config, VFS, Router, Out, auth } from './oja.core.esm.js';
-
-await config.load();
-
-const vfs    = new VFS('my-app');
-const router = new Router({ outlet: '#app', vfs });
-
-await vfs.ready();
-await config.applyVFS(vfs, './');
-config.applyRouter(router, { auth });
-
-router.Get('/login',     Out.c('pages/login.html'));
-router.Get('/dashboard', Out.c('pages/dashboard.html'));
-
-router.start('/');
-```
+---
 
 ### Events — delegated, cross-component
 
 ```js
-import { on, once, off, emit, listen, debounce, throttle, keys } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { on, once, off, emit, listen, debounce, throttle, keys } from '@agberohq/oja';
 
 // Or via the Event group:
-import { Event } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { Event } from '@agberohq/oja';
 
 on('.btn-delete', 'click', (e, el) => deleteItem(el.dataset.id));
 once('#confirm-ok', 'click', handleConfirm);
@@ -687,10 +729,12 @@ onVisible('#lazy-section', () => loadContent());
 onResize('#chart', ({ width, height }) => redraw(width, height));
 ```
 
+---
+
 ### Drag and drop
 
 ```js
-import { dragdrop } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js';
+import { dragdrop } from '@agberohq/oja';
 
 // Reorderable list
 dragdrop.reorder('#host-list', {
@@ -718,10 +762,12 @@ dragdrop.dropTarget('.folder', {
 });
 ```
 
+---
+
 ### Forms
 
 ```js
-import { form } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { form } from '@agberohq/oja';
 
 form.on('#loginForm', {
     submit:  async (data) => api.post('/login', data),
@@ -746,12 +792,24 @@ form.image('#avatarInput', '#avatarPreview', {
     accept    : ['image/jpeg', 'image/png'],
     onError   : (msg) => notify.error(msg),
 });
+
+// Collect field values without a submit event
+const data = form.collect('#myForm');
+
+// Dirty tracking — detect unsaved changes
+const stop = form.dirty('#editForm', (field, isDirty) => {
+    document.querySelector('#save-btn').disabled = !isDirty;
+});
+// Reset the baseline after a successful save
+form.resetDirty('#editForm');
 ```
+
+---
 
 ### Notifications
 
 ```js
-import { notify } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { notify } from '@agberohq/oja';
 
 notify.success('Host added');
 notify.error('Connection failed', { duration: 8000 });
@@ -759,7 +817,7 @@ notify.warn('Session expires in 5 minutes', {
     action: { label: 'Renew', fn: () => auth.session.renew() }
 });
 
-// banner() accepts a string or Out
+// banner() — persistent full-width message, stays until dismissed
 notify.banner('⚠️ Connection lost');
 notify.banner(Out.html('⚠️ Outage: <a href="#/status">details</a>'), { type: 'warn' });
 notify.dismissBanner();
@@ -767,10 +825,12 @@ notify.dismissBanner();
 notify.setPosition('top-right'); // top-right | top-left | top-center | bottom-*
 ```
 
+---
+
 ### Modals
 
 ```js
-import { modal } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { modal } from '@agberohq/oja';
 
 modal.open('confirmModal');
 modal.close();
@@ -791,10 +851,170 @@ const confirmed = await modal.confirm('Delete this rule?');
 if (confirmed) await api.delete(`/api/firewall?ip=${ip}`);
 ```
 
+---
+
+### Engine — smart DOM updates
+
+```js
+import { engine, Store } from '@agberohq/oja';
+
+// Wire to your app store once in app.js — data-oja-bind attributes then update automatically
+const store = new Store('myapp');
+engine.useStore(store);
+
+// Keyed list reconciliation — only changed nodes are patched
+engine.list(listEl, items, {
+    key:    item => item.id,
+    render: (item, existing) => {
+        const el = existing || document.createElement('div');
+        el.className  = 'item';
+        el.dataset.id = item.id;
+        el.querySelector('span').textContent = item.text;
+        return el;
+    },
+    empty: () => {
+        const el = document.createElement('p');
+        el.textContent = 'No items yet';
+        return el;
+    },
+});
+
+// Morph — tree-diff existing DOM against new HTML, preserving focus and scroll position
+await engine.morph(find('#stats-panel'), buildHtml(stats));
+
+// Skip an expensive build when content hasn't changed
+if (engine.shouldMorph(find('#panel'), html)) {
+    await engine.morph(find('#panel'), html);
+}
+
+// Declarative bindings — element updates when store key is written
+// HTML:  <span data-oja-bind="task.count"></span>
+// JS:
+effect(() => { engine.set('task.count', tasks().length); });
+
+// Scan a component subtree for data-oja-bind attributes
+component.onMount(el => engine.scan(el));
+
+// Auto-scan shell-level bindings across all routes (uses MutationObserver — use sparingly)
+engine.enableAutoBind();
+```
+
+---
+
+### Table
+
+```js
+import { table } from '@agberohq/oja';
+
+const headers = [
+    { key: 'hostname', label: 'Host',   sortable: true  },
+    { key: 'rps',      label: 'Req/s',  sortable: true  },
+    { key: 'status',   label: 'Status', sortable: false },
+];
+
+// Render
+const t = table.render(find('#host-table'), rows, headers, {
+    pageSize:   20,
+    onRowClick: (row) => openHostDetail(row),
+    actions: [
+        { label: 'Edit',   onClick: (row) => editHost(row.id) },
+        { label: 'Delete', onClick: (row) => deleteHost(row.id), style: 'danger' },
+    ],
+});
+
+// Push new data — sort state and page are preserved
+effect(() => { t.update(hosts()); });
+
+// Cell shapes
+const rows = hosts().map(h => ({
+    hostname: { value: h.hostname, onClick: () => openDetail(h) },
+    rps:      h.rps,
+    status:   { value: h.alive ? 'Healthy' : 'Down', badge: h.alive ? 'success' : 'error' },
+}));
+
+// Server-side pagination
+const t = table.render(find('#host-table'), [], headers, {
+    pageSize: 25,
+    fetchData: async (page, size, sortKey, dir) => {
+        const res = await api.get(`/hosts?page=${page}&size=${size}&sort=${sortKey}&dir=${dir}`);
+        return { data: res.rows, total: res.total };
+    },
+});
+
+// Loading state
+t.setLoading(true);
+t.update(await api.get('/hosts'));
+t.setLoading(false);
+```
+
+---
+
+### Search and autocomplete
+
+```js
+import { Search, Trie, autocomplete } from '@agberohq/oja';
+
+// Full-text search index
+const index = new Search([], {
+    fields:      ['text', 'tag', 'description'],
+    weights:     { text: 2, tag: 1 },
+    fuzzy:       true,   // optional — tolerates typos
+    maxDistance: 1,
+});
+
+index.add('id-1', { text: 'Fix login bug', tag: 'auth' });
+index.addAll(tasks().map(t => ({ id: t.id, ...t })));
+
+const results = index.search('logn'); // fuzzy match finds 'login'
+results.forEach(r => console.log(r.doc, r.score));
+
+// Override fuzzy per call
+const exact = index.search('login', { fuzzy: false });
+
+index.remove('id-1');
+index.clear();
+
+// Trie — fast prefix autocomplete (backed by a prefix tree)
+const trie = new Trie();
+trie.insert('api.prod');
+trie.insertAll(['api.staging', 'web.prod', 'web.staging']);
+
+trie.autocomplete('api.');                         // → ['api.prod', 'api.staging']
+trie.fuzzySearch('prod', { maxDistance: 1 });      // → ['api.prod', 'web.prod']
+
+// Attach autocomplete to any input
+const handle = autocomplete.attach(find('#search-input'), {
+    source:   trie,            // Trie, Search, array, or async function
+    limit:    8,
+    onSelect: (value) => { find('#search-input').value = value; },
+});
+
+component.onUnmount(() => handle.destroy());
+```
+
+---
+
+### Clipboard
+
+```js
+import { clipboard } from '@agberohq/oja';
+
+await clipboard.write('some text');
+await clipboard.write(html, { format: 'text/html' });
+
+const text = await clipboard.read();
+
+// Copy from an element's value or text content
+clipboard.from('#url-field');
+clipboard.from('#code-block', { type: 'text' });
+```
+
+---
+
 ### Real-time — SSE and WebSocket
 
 ```js
-import { OjaSSE, OjaSocket } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js';
+import { OjaSSE, OjaSocket } from '@agberohq/oja';
 
 // Server-Sent Events
 const sse = new OjaSSE('/api/events');
@@ -820,7 +1040,7 @@ Both reconnect automatically with exponential backoff.
 ### Channel — Go-style coordination
 
 ```js
-import { Channel, go, pipeline, fanOut, fanIn } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.full.esm.js';
+import { Channel, go, pipeline, fanOut, fanIn } from '@agberohq/oja';
 
 const ch = new Channel({ buffer: 10, workers: true, name: 'images' });
 
@@ -848,7 +1068,7 @@ component.onUnmount(() => ch.close());
 `Runner` is for infrastructure that needs to stay alive across the app lifetime — game loops, simulations, persistent connections. VFS uses it internally.
 
 ```js
-import { Runner } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { Runner } from '@agberohq/oja';
 
 const worker = new Runner((self) => {
     let count = 0;
@@ -891,7 +1111,7 @@ The boundary rule: **Would another app ever need this?** Yes → it belongs in `
 ## Logging and debugging
 
 ```js
-import { logger, debug } from 'https://cdn.jsdelivr.net/npm/@agberohq/oja@latest/build/oja.core.esm.js';
+import { logger, debug } from '@agberohq/oja';
 
 logger.info('auth', 'User logged in', { userId: 42 });
 logger.warn('api', 'Slow response', { ms: 1240, path: '/config' });
@@ -908,6 +1128,44 @@ debug.enable('router,auth,api'); // or '*' for everything
 debug.dump();   // prints full timeline to console
 window._debug = debug; // access from browser console
 ```
+
+---
+
+## Feature overview
+
+| Feature | Export | Build |
+|---------|--------|-------|
+| Reactive state (`state`, `effect`, `derived`, `batch`) | named | core + full |
+| Cross-module state (`context`) | named | core + full |
+| Router (hash + history, groups, middleware) | `Router`, `Out` | core + full |
+| Layout (persistent shell) | `layout` | core + full |
+| Component mount + lifecycle | `component` | core + full |
+| Template syntax (`{{}}`, `data-if`, `data-each`) | built-in | core + full |
+| Auth (levels, session, JWT) | `auth` | core + full |
+| Notifications (toast + banner) | `notify` | core + full |
+| Modals + drawers (stack, confirm, focus trap) | `modal` | core + full |
+| Forms (lifecycle, validation, dirty tracking, image) | `form` | core + full |
+| Events (delegated, emit/listen, keyboard shortcuts) | `on`, `emit`, `listen`, `keys` | core + full |
+| Store (session/local/memory, encrypt, watch) | `Store` | core + full |
+| Encryption (Web Crypto, seal/open/rotate) | `encrypt` | core + full |
+| Engine (list reconcile, morph, `data-oja-bind`) | `engine` | core + full |
+| Search + autocomplete (full-text, fuzzy, trie) | `Search`, `Trie`, `autocomplete` | core + full |
+| Table (sort, pagination, row actions, remote data) | `table` | full |
+| Clipboard (read/write/cut, multi-format) | `clipboard` | core + full |
+| Drag and drop (reorder, drop zone, custom) | `dragdrop` | full |
+| SSE (auto-reconnect) | `OjaSSE` | full |
+| WebSocket (auto-reconnect) | `OjaSocket` | full |
+| Web Worker wrapper | `OjaWorker` | full |
+| WASM component model | `OjaWasm` | full |
+| Channel + go (Go-style concurrency) | `Channel`, `go` | full |
+| Runner (long-lived background worker) | `Runner` | full |
+| VFS (offline-first IndexedDB filesystem) | `VFS` | core + full |
+| Config (`oja.config.json`) | `config` | core + full |
+| CSS variables helpers | `cssVars` | core + full |
+| Canvas utilities | `canvas` | full |
+| WebRTC | `webrtc` | full |
+| Logging + debug | `logger`, `debug` | core + full |
+| Adapter bridge (D3, Chart.js, GSAP, etc.) | `adapter` | core + full |
 
 ---
 
