@@ -195,6 +195,7 @@ export function pagination(opts = {}) {
 
         // Delegate click and change — ONE listener each on the container
         const handleClick = (e) => {
+            if (!e.target || typeof e.target.closest !== 'function') return;
             const btn = e.target.closest('[data-pg]');
             if (!btn) return;
             const action = btn.dataset.pg;

@@ -731,6 +731,7 @@ export function enableTouchSupport() {
     if (_touchListenersAdded) return;
 
     const handleTouchStart = (e) => {
+        if (!e.target || typeof e.target.closest !== 'function') return;
         const target = e.target.closest('[draggable="true"]');
         if (!target) return;
 

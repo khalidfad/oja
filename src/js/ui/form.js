@@ -86,7 +86,7 @@
  *
  *   // Select with options
  *   form.select('#region', {
- *       options: [
+ *       options:[
  *           { value: 'us', label: 'United States' },
  *           { value: 'eu', label: 'Europe' },
  *           { value: 'asia', label: 'Asia' }
@@ -220,6 +220,13 @@ export const form = {
             this._setValue(data, key, value);
         });
 
+        // Loop inputs directly to extract masked values where applicable
+        el.querySelectorAll('input[data-oja-raw-value]').forEach(inp => {
+            if (inp.name && inp.name in data) {
+                data[inp.name] = inp.dataset.ojaRawValue;
+            }
+        });
+
         // Handle checkboxes — unchecked ones don't appear in FormData.
         // We need to distinguish two cases:
         //   1. Single checkbox (name is unique): collect as boolean
@@ -227,7 +234,7 @@ export const form = {
         //      checked values, e.g. <input type="checkbox" name="roles" value="admin">
         const checkboxGroups = new Map(); // name → [{ el, value }]
         el.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-            if (!checkboxGroups.has(cb.name)) checkboxGroups.set(cb.name, []);
+            if (!checkboxGroups.has(cb.name)) checkboxGroups.set(cb.name,[]);
             checkboxGroups.get(cb.name).push(cb);
         });
 
@@ -252,15 +259,15 @@ export const form = {
             }
         });
 
-        // Handle number inputs
+        // Handle number inputs (that are not masked)
         el.querySelectorAll('input[type="number"]').forEach(inp => {
-            if (inp.name in data) {
+            if (inp.name in data && !inp.hasAttribute('data-oja-raw-value')) {
                 data[inp.name] = inp.value === '' ? null : Number(data[inp.name]);
             }
         });
 
         // Handle rich text editors
-        for (const [field, editor] of _editorInstances) {
+        for (const[field, editor] of _editorInstances) {
             if (field.form === el || el.contains(field)) {
                 data[field.name] = editor.getContent();
             }
@@ -319,7 +326,9 @@ export const form = {
             if (editor) {
                 value = editor.getContent();
             } else if (input) {
-                if (input.type === 'checkbox') {
+                if (input.dataset.ojaRawValue !== undefined) {
+                    value = input.dataset.ojaRawValue;
+                } else if (input.type === 'checkbox') {
                     value = input.checked;
                 } else if (input.type === 'radio') {
                     const checked = el.querySelector(`[name="${field}"]:checked`);
@@ -357,7 +366,7 @@ export const form = {
      *   form.editor('#content', {
      *       placeholder: 'Write your content...',
      *       maxLength: 5000,
-     *       toolbar: ['bold', 'italic', 'link', 'list'],
+     *       toolbar:['bold', 'italic', 'link', 'list'],
      *       onChange: (html, text) => console.log('Changed', { html, text })
      *   });
      *
@@ -379,7 +388,7 @@ export const form = {
             placeholder = '',
             maxLength = Infinity,
             readonly = false,
-            toolbar = [],
+            toolbar =[],
             onChange = null,
             onBlur = null,
             onFocus = null
@@ -546,7 +555,7 @@ export const form = {
      * Enhance a select element with options and change handler.
      *
      *   form.select('#region', {
-     *       options: [
+     *       options:[
      *           { value: 'us', label: 'United States' },
      *           { value: 'eu', label: 'Europe' }
      *       ],
@@ -558,7 +567,7 @@ export const form = {
         if (!el || el.tagName !== 'SELECT') return this;
 
         const {
-            options: optionList = [],
+            options: optionList =[],
             onChange = null,
             placeholder = null
         } = options;
@@ -733,7 +742,6 @@ export const form = {
      *       onInput: debounce((value) => {
      *           return value.includes('@') || 'Invalid format';
      *       }, 300)
-     *   });
      */
     watch(target, handlers = {}) {
         const el = _resolve(target);
@@ -781,6 +789,7 @@ export const form = {
     },
 
     _getFieldValue(el) {
+        if (el.dataset.ojaRawValue !== undefined) return el.dataset.ojaRawValue;
         if (el.type === 'checkbox') return el.checked;
         if (el.type === 'radio') {
             const name = el.name;
@@ -903,7 +912,7 @@ export const form = {
                 this._notifyDirty(el, fieldName, false);
             }
         } else {
-            for (const [name, input] of this._getFormFields(el)) {
+            for (const[name, input] of this._getFormFields(el)) {
                 const original = this._getFieldValue(input);
                 formState.set(name, { original, current: original, isDirty: false });
                 this._notifyDirty(el, name, false);
@@ -917,7 +926,7 @@ export const form = {
         if (_dirtyState.has(form)) return;
 
         const formState  = new Map();
-        const _listeners = []; // Track every listener so dispose() can remove them
+        const _listeners =[]; // Track every listener so dispose() can remove them
 
         for (const [name, input] of this._getFormFields(form)) {
             const original = this._getFieldValue(input);
@@ -986,7 +995,7 @@ export const form = {
             if (!input.name || input.disabled) continue;
             if (input.type === 'radio' || input.type === 'checkbox') {
                 if (input === form.querySelector(`[name="${input.name}"]`)) {
-                    yield [input.name, input];
+                    yield[input.name, input];
                 }
             } else if (!(input instanceof HTMLButtonElement)) {
                 yield [input.name, input];
@@ -1134,7 +1143,7 @@ export const form = {
      *
      *   form.image('#avatarInput', '#avatarPreview', {
      *       maxSizeMb : 2,
-     *       accept    : ['image/jpeg', 'image/png', 'image/webp'],
+     *       accept    :['image/jpeg', 'image/png', 'image/webp'],
      *       onError   : (msg) => notify.error(msg),
      *       onSelect  : (file, dataUrl) => { ... },
      *   });
@@ -1150,7 +1159,7 @@ export const form = {
 
         const {
             maxSizeMb = 5,
-            accept    = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+            accept    =['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
             onError   = null,
             onSelect  = null,
         } = options;
@@ -1207,13 +1216,13 @@ export const form = {
         const {
             max       = 10,
             maxSizeMb = 5,
-            accept    = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+            accept    =['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
             onError   = null,
             onSelect  = null,
         } = options;
 
         input.addEventListener('change', async () => {
-            const files = Array.from(input.files || []);
+            const files = Array.from(input.files ||[]);
             if (!files.length) return;
 
             if (files.length > max) {
@@ -1223,7 +1232,7 @@ export const form = {
             }
 
             container.innerHTML = '';
-            const valid = [];
+            const valid =[];
 
             for (const file of files) {
                 if (accept.length && !accept.includes(file.type)) continue;
@@ -1420,7 +1429,7 @@ export const form = {
     //   form.colorPicker('#fill-color', {
     //       value:    '#3b82f6',
     //       alpha:    false,
-    //       swatches: ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6'],
+    //       swatches:['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6'],
     //       onChange: (hex) => setFill(hex),
     //       onInput:  (hex) => previewFill(hex),
     //   });
@@ -1432,7 +1441,7 @@ export const form = {
         const {
             value    = '#000000',
             alpha    = false,
-            swatches = [],
+            swatches =[],
             onChange = null,
             onInput  = null,
         } = options;
