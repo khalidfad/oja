@@ -178,6 +178,7 @@
 import { render as templateRender, fill, each } from './template.js';
 import { execScripts }                           from './_exec.js';
 import { emit }                                  from './events.js';
+import { runtime }                               from './runtime.js';
 import { effect }                                from './reactive.js';
 import { animate }                               from './animate.js';
 import { _segmentRender }                        from './segment.js';
@@ -230,11 +231,14 @@ async function _fetchHTML(url, options = {}) {
 
     if (options.signal?.aborted) throw new Error('[oja/out] fetch aborted');
 
+    if (!runtime.isOriginAllowed(url)) throw new Error(`[oja/out] blocked origin: ${url}`);
+
     emit('out:fetch-start', { url });
     const start = performance.now();
 
     try {
-        const res = await fetch(url, { signal: options.signal });
+        const fetchOpts = runtime.runFetchHooks(url, { signal: options.signal });
+        const res = await fetch(url, fetchOpts);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const html = await res.text();
@@ -348,7 +352,7 @@ class _HtmlOut extends _Out {
 
     async render(container) {
         container.innerHTML = this._payload;
-        execScripts(container, null, {});
+        if (!runtime.isSandboxed()) execScripts(container, null, {});
     }
 
     getText() {
@@ -526,7 +530,7 @@ class _ComponentOut extends _Out {
             const oldActive = component._activeElement;
             component._activeElement = container;
             try {
-                execScripts(container, this._payload, mergedData);
+                if (!runtime.isSandboxed()) execScripts(container, this._payload, mergedData);
             } finally {
                 component._activeElement = oldActive;
             }
@@ -619,7 +623,7 @@ class _FnOut extends _Out {
                 }
             } else if (typeof result === 'string') {
                 container.innerHTML = result;
-                execScripts(container, null, {});
+                if (!runtime.isSandboxed()) execScripts(container, null, {});
             }
         } catch (e) {
             console.error('[oja/out] fn Out threw:', e);
@@ -972,6 +976,7 @@ class OutTarget {
         }
 
         const wrappedHandler = (e) => {
+            if (!e.target || typeof e.target.closest !== 'function') return;
             if (selector) {
                 const target = e.target.closest(selector);
                 if (!target || !el.contains(target)) return;

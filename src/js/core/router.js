@@ -100,6 +100,7 @@
 import { Store }     from './store.js';
 import { Out }       from './out.js';
 import { component } from './component.js';
+import { runtime }   from './runtime.js';
 
 const _store = new Store('oja:router');
 
@@ -195,6 +196,7 @@ export class Router {
         const opts = { ..._prefetchConfig, ...options };
 
         const handler = (e) => {
+            if (!e.target || typeof e.target.closest !== 'function') return;
             const link = e.target.closest(selector);
             if (!link) return;
 
@@ -209,6 +211,7 @@ export class Router {
         };
 
         const cancelHandler = (e) => {
+            if (!e.target || typeof e.target.closest !== 'function') return;
             const link = e.target.closest(selector);
             if (!link) return;
             const data = _prefetchLinks.get(link);
@@ -446,6 +449,20 @@ export class Router {
 
         ctx.params = { ...match.params, ...query };
 
+        // Fire global runtime navigate hooks — allows analytics, permission guards,
+        // and A/B middleware to observe or cancel navigation before beforeEach runs.
+        const navResult = runtime.runNavigateHooks({
+            from:   this._current,
+            to:     pathname,
+            route:  match.route,
+            params: match.params,
+            query,
+        });
+        if (navResult.cancelled) {
+            if (navResult.redirectTo) await this.navigate(navResult.redirectTo);
+            return;
+        }
+
         for (const fn of this._beforeEach) {
             const stop = await fn(ctx);
             if (stop === false) return;
@@ -644,14 +661,17 @@ export class Router {
     _match(pathname) {
         const parts      = _segments(pathname);
         const params     = {};
+        const routeSegs  = [];
         let   node       = this._root;
 
         for (const part of parts) {
             if (node.children.has(part)) {
                 node = node.children.get(part);
+                routeSegs.push(part);
             } else if (node.paramChild) {
                 node = node.paramChild;
                 params[node.paramName] = decodeURIComponent(part);
+                routeSegs.push(`:${node.paramName}`);
             } else {
                 return null;
             }
@@ -666,6 +686,7 @@ export class Router {
             responder:  node.responder,
             params,
             middleware: [...this._globalMiddleware, ...node.middleware],
+            route:      '/' + routeSegs.join('/'),
         };
     }
 }

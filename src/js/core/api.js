@@ -52,6 +52,7 @@
  */
 
 import { jsonCodec } from './codecs/json.js';
+import { runtime }   from './runtime.js';
 
 export class Api {
     /**
@@ -339,6 +340,10 @@ export class Api {
         const timeoutId  = setTimeout(() => controller.abort(), this._timeout);
         opts.signal = controller.signal;
 
+        // Run global fetch hooks (pipeline) — e.g. add trace headers, sign requests.
+        // This runs after instance-level beforeRequest hooks so instance config wins.
+        const finalOpts = runtime.runFetchHooks(this._base + path, opts);
+
         const url     = this._base + path;
         const startMs = Date.now();
         let   res     = null;
@@ -346,7 +351,7 @@ export class Api {
 
         while (attempt <= this._retries) {
             try {
-                res = await fetch(url, opts);
+                res = await fetch(url, finalOpts);
                 clearTimeout(timeoutId);
                 this._setOnline(true);
                 break;
@@ -355,6 +360,7 @@ export class Api {
                 if (attempt > this._retries || e.name === 'AbortError') {
                     clearTimeout(timeoutId);
                     this._setOnline(false);
+                    runtime.reportError(e, 'api');
                     return null;
                 }
                 await _wait(this._retryDelay * attempt);
