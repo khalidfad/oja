@@ -158,6 +158,30 @@ let   _backdrop = null;
 
 // ─── Accessibility helpers ────────────────────────────────────────────────────
 
+// Hidden sibling tracking for aria isolation
+const _hiddenSiblings = [];
+
+function _hideSiblingsFromAT(modalEl) {
+    _hiddenSiblings.length = 0;
+    // Walk direct children of body; hide everything that is not the modal or its overlay
+    for (const child of document.body.children) {
+        if (child === modalEl || child.contains(modalEl)) continue;
+        if (child.getAttribute('aria-hidden') === 'true') continue; // already hidden
+        if (child.id === 'oja-announcer') continue;
+        child.setAttribute('aria-hidden', 'true');
+        child.setAttribute('inert', '');
+        _hiddenSiblings.push(child);
+    }
+}
+
+function _restoreSiblingsFromAT() {
+    for (const el of _hiddenSiblings) {
+        el.removeAttribute('aria-hidden');
+        el.removeAttribute('inert');
+    }
+    _hiddenSiblings.length = 0;
+}
+
 function _setAriaHidden(element, hidden) {
     if (!element) return;
     element.setAttribute('aria-hidden', hidden ? 'true' : 'false');
@@ -218,7 +242,9 @@ export const modal = {
         if (_stack.length === 1) {
             _showBackdrop();
             document.body.style.overflow = 'hidden';
-            document.body.setAttribute('aria-hidden', 'true');
+            // Hide siblings of the modal from AT — do NOT set aria-hidden on body itself
+            // because the modal lives inside body and would be hidden along with everything else.
+            _hideSiblingsFromAT(el);
         }
 
         if (data.body && Out.is(data.body)) {
@@ -264,7 +290,7 @@ export const modal = {
             _releaseFocusTrap();
             _hideBackdrop();
             document.body.style.overflow = '';
-            document.body.removeAttribute('aria-hidden');
+            _restoreSiblingsFromAT();
         } else {
             const topElement = _stack[_stack.length - 1].element;
             _setupFocusTrap(topElement);
