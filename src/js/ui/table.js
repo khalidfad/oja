@@ -194,6 +194,7 @@ export const table = {
         let totalRemote    = 0;
         let sortKey        = null;
         let sortDir        = 'asc';
+        let hiddenColumns  = new Set();
         let currentPage    = 1;
         let loading        = false;
         let allLoaded      = false;
@@ -229,7 +230,7 @@ export const table = {
             const cols =[];
             if (selectable) cols.push({ key: '__select', label: '<input type="checkbox" class="oja-table-select-all">', sortable: false, _select: true, width: '40px' });
             if (numbering) cols.push({ key: '__num', label: '#', sortable: false, _num: true });
-            cols.push(...headers);
+            cols.push(...headers.filter(h => !hiddenColumns.has(h.key)));
             if (actions.length > 0) cols.push({ key: '__actions', label: '', sortable: false, _actions: true });
             return cols;
         }
@@ -806,6 +807,100 @@ export const table = {
                     el.removeEventListener(type, handler);
                 }
                 container.innerHTML = '';
+            },
+
+            // Column visibility controls
+            hideColumn(key) {
+                hiddenColumns.add(key);
+                _buildHeader();
+                _renderBody();
+                return this;
+            },
+
+            showColumn(key) {
+                hiddenColumns.delete(key);
+                _buildHeader();
+                _renderBody();
+                return this;
+            },
+
+            toggleColumn(key) {
+                if (hiddenColumns.has(key)) this.showColumn(key);
+                else this.hideColumn(key);
+                return this;
+            },
+
+            getVisibleColumns() {
+                return headers.filter(h => !hiddenColumns.has(h.key)).map(h => h.key);
+            },
+
+            getHiddenColumns() {
+                return [...hiddenColumns];
+            },
+
+            // Row expansion
+            // Call with a factory fn to enable inline row expansion.
+            // Factory receives the row data and returns an HTML string or Out.
+            //
+            //   t.enableRowExpansion((row) => `<div class="detail">${row.notes}</div>`);
+            enableRowExpansion(factory) {
+                if (typeof factory !== 'function') return this;
+
+                // Add click handler to toggle row expansion
+                _listeners.push({
+                    el: container,
+                    type: 'click',
+                    handler: async (e) => {
+                        const row = e.target.closest('tr[data-row-idx]');
+                        if (!row || e.target.closest('[data-action]')) return;
+
+                        const idx     = parseInt(row.dataset.rowIdx);
+                        const isOpen  = row.dataset.expanded === 'true';
+                        const tbody   = container.querySelector('tbody');
+                        if (!tbody) return;
+
+                        // Close any open expansion rows
+                        tbody.querySelectorAll('tr.oja-row-expanded').forEach(r => r.remove());
+                        tbody.querySelectorAll('tr[data-expanded="true"]').forEach(r => {
+                            r.dataset.expanded = 'false';
+                            r.querySelector('.oja-row-expand-icon')?.textContent !== undefined &&
+                                (r.querySelector('.oja-row-expand-icon').textContent = '▶');
+                        });
+
+                        if (isOpen) return; // was open, now closed
+
+                        row.dataset.expanded = 'true';
+                        const icon = row.querySelector('.oja-row-expand-icon');
+                        if (icon) icon.textContent = '▼';
+
+                        const colspan = _allCols().length;
+                        const expandRow = document.createElement('tr');
+                        expandRow.className = 'oja-row-expanded';
+                        const td = document.createElement('td');
+                        td.colSpan = colspan;
+                        td.style.padding = '0';
+
+                        const sourceRow = (localRows[idx] || {});
+                        const result = factory(sourceRow, idx);
+
+                        if (typeof result === 'string') {
+                            td.innerHTML = result;
+                        } else if (result && typeof result.render === 'function') {
+                            await result.render(td);
+                        }
+
+                        expandRow.appendChild(td);
+                        row.insertAdjacentElement('afterend', expandRow);
+                    },
+                });
+
+                container.addEventListener('click', _listeners[_listeners.length - 1].handler);
+
+                // Add expand icon to first data column in header
+                const firstTh = container.querySelector('thead th:not([data-select]):not([data-num])');
+                if (firstTh) firstTh.style.paddingLeft = '28px';
+
+                return this;
             },
         };
     },
