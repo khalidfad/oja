@@ -7,8 +7,8 @@ exactly when it is needed, so you never learn something in the abstract.
 By the end you will know how to use every core primitive:
 `state`, `effect`, `context`, `derived`, `batch`, routing, components,
 layouts, forms, modals, keyboard shortcuts, auth guards, the engine,
-search, tables, VFS, config, progress tracking, and component communication
-with `signal()`.
+search, tables, VFS, config, progress tracking, component communication
+with `signal()`, and building DOM with `make()`.
 
 No build step. No compiler. Just files.
 
@@ -100,25 +100,23 @@ my-app/
 **app.js**
 
 ```js
-import { state, effect } from '@agberohq/oja';
+import { state, effect, make, on } from '@agberohq/oja';
 
 const [count, setCount] = state(0);
 
-document.getElementById('app').innerHTML = `
-    <button id="btn">Clicked: 0</button>
-`;
-
-const btn = document.getElementById('btn');
+// make() builds DOM — no HTML strings, no innerHTML
+const btn = make.button({ id: 'btn', class: 'btn' }, 'Clicked: 0')
+    .appendTo('#app');
 
 effect(() => {
-    btn.textContent = `Clicked: ${count()}`;
+    btn.update({ text: `Clicked: ${count()}` });
 });
 
-btn.addEventListener('click', () => setCount(n => n + 1));
+on('#btn', 'click', () => setCount(n => n + 1));
 ```
 
-This is Oja at its core — `state` holds a value, `effect` reacts to it.
-Nothing else is involved.
+This is Oja at its core — `state` holds a value, `effect` reacts to it,
+`make` builds the DOM, `on` handles events. Nothing else is involved.
 
 ---
 
@@ -228,6 +226,106 @@ router.Get('/', Out.component('pages/home.html', { user: currentUser }));
 
 // ✗ Pass a snapshot — component gets a frozen value, never updates
 router.Get('/', Out.component('pages/home.html', { user: currentUser() }));
+```
+
+
+---
+
+## Part 3b — make() — building DOM without strings
+
+The `make()` function builds DOM elements programmatically. Instead of writing
+HTML strings and injecting them with `innerHTML`, you describe the element
+you want and Oja builds it.
+
+```js
+import { make } from '@agberohq/oja';
+
+// make(tag, options?, ...children)
+const card = make('div', { class: 'host-card', data: { id: host.id } },
+    make('h2', { class: 'hostname' }, host.name),
+    make('span', { class: 'status' }, 'Online'),
+);
+```
+
+But you will mostly use the shorthand factories — one for every HTML tag:
+
+```js
+make.div()      make.span()     make.p()        make.a()
+make.button()   make.input()    make.ul()        make.li()
+make.h1()  ...  make.h6()       make.table()     make.tr()  make.td()
+make.form()     make.label()    make.section()   make.nav()
+```
+
+Every shorthand accepts the same `(options?, ...children)` signature:
+
+```js
+make.button({ class: 'btn-primary', on: { click: save } }, 'Save changes')
+make.input({ attrs: { type: 'email', placeholder: 'you@example.com' } })
+make.a({ attrs: { href: '#/hosts' }, class: 'nav-link' }, 'Hosts')
+```
+
+### Options
+
+| Key | Type | What it does |
+|-----|------|--------------|
+| `class` | `string \| string[]` | Sets className — string or array of names |
+| `id` | `string` | Sets the element's id |
+| `style` | `object` | Inline styles — `{ color: 'red', fontSize: '14px' }` |
+| `attrs` | `object` | HTML attributes — `{ type: 'email', disabled: '' }` |
+| `data` | `object` | data-* attributes — `{ id: '42' }` → `data-id="42"` |
+| `on` | `object` | Event listeners — `{ click: fn, input: fn }` |
+| `text` | `string` | Sets textContent |
+| `html` | `string` | Sets innerHTML |
+
+### Placement — where the chain shines
+
+The real power is the placement methods. Every element returned by `make()` has
+five of them — all return `this` so you can keep chaining:
+
+```js
+// Build a card and append it to the host list
+make.div({ class: 'host-card', data: { id: host.id } },
+    make.h2({ class: 'hostname' }, host.name),
+    make.p({ class: 'status' }, host.alive ? 'Online' : 'Offline'),
+    make.button({ class: 'btn-sm', on: { click: () => edit(host.id) } }, 'Edit'),
+)
+.appendTo('#host-list');   // append as last child
+
+// Other placement methods — same API
+.prependTo('#list')        // prepend as first child
+.after('#some-element')    // insert as next sibling
+.before('#some-element')   // insert as previous sibling
+.replace('#old-element')   // replace an element entirely
+```
+
+After placement, you can keep going with `.update()`:
+
+```js
+make.div({ class: 'badge' }, 'Loading…')
+    .appendTo('#notifications')
+    .update({ class: { add: 'badge-info' } });
+```
+
+### Children can be strings, numbers, elements, or arrays
+
+```js
+make.ul({ class: 'tag-list' },
+    tags.map(t => make.li({ class: 'tag' }, t)),  // array of elements
+)
+
+make.p({}, 'You have ', count, ' messages')       // string + number + string
+
+make.div({}, existingElement)                      // existing DOM element
+```
+
+### Enhance an existing element
+
+If you already have an element — from `find()`, from the DOM, from anywhere —
+you can enhance it by passing it directly to `make()`:
+
+```js
+const el = document.getElementById('legacy-panel');
+make(el).appendTo('#new-container').update({ class: { add: 'migrated' } });
 ```
 
 ---
@@ -521,24 +619,69 @@ Inside the HTML markup (not the script), use `{{variable}}` syntax:
 </div>
 ```
 
-### Rendering into an element
+### Rendering and updating elements
 
-Oja extends every DOM element it touches with a `.render()` method that accepts
-any `Out` responder. This lets you surgically update one part of a mounted
-component without re-mounting the whole thing:
+Every element you get back from `find()`, `query()`, `findAll()`, or `make()`
+is enhanced with `.update()`, `.list()`, and `.render()`. These three methods
+cover everything you need to change an element after it is mounted.
+
+**`.render(out)`** — replace the element's contents with any `Out`:
 
 ```js
 const panelEl = find('#details-panel');
 
-// Replace the panel's contents with a component
 panelEl.render(Out.component('components/detail.html', { item }));
-
-// Or with inline HTML
 panelEl.render(Out.html(`<p>Updated at ${new Date().toLocaleTimeString()}</p>`));
 ```
 
-This is the same mechanism `modal.open()` uses for its `body` option — it calls
-`.render()` on the `[data-modal-body]` slot internally.
+**`.update(descriptor)`** — declarative patch — describe what the element should
+look like and Oja applies the minimum change:
+
+```js
+find('#badge').update({
+    text:  'Online',
+    class: { add: 'badge-success', remove: 'badge-loading' },
+    attr:  { 'data-status': 'alive' },
+    style: { fontWeight: 'bold' },
+});
+
+// out key — render any Out
+find('#panel').update({ out: Out.c('components/detail.html', { host }) });
+
+// fn key — full control, return an Out or mutate directly
+find('#chart').update({
+    fn: async (el) => {
+        const data = await api.get('/metrics');
+        return Out.timeSeries(data.series, { height: 80 });
+    },
+});
+```
+
+Any value that is a function is treated as **reactive** — it is wrapped in
+`effect()` automatically and re-runs whenever a signal it reads changes:
+
+```js
+// This updates automatically whenever host() changes
+find('#status').update({
+    text:  () => host().alive ? 'Online' : 'Offline',
+    class: () => ({ add: host().alive ? 'badge-success' : 'badge-error',
+                    remove: host().alive ? 'badge-error' : 'badge-success' }),
+});
+```
+
+**`.list(items, options)`** — keyed list reconciliation directly on an element.
+Only changed nodes are patched — no full rebuild:
+
+```js
+find('#host-list').list(() => hosts(), {
+    key:    h => h.id,
+    render: h => Out.c('components/host-row.html', h),
+    empty:  Out.h('<p>No hosts configured</p>'),
+});
+```
+
+Pass a function as `items` to make it reactive — the list re-reconciles
+automatically whenever the signal changes.
 
 ---
 
@@ -1020,6 +1163,8 @@ router.start('/');
 | Missing `<script type="importmap">` in `index.html` | `Failed to resolve module specifier "@agberohq/oja"` in the browser console | Add the import map to `index.html` — it only needs to be there once and covers every script on the page |
 | `Out.to(el)\`template\`` | `TypeError: Out.to(...) is not a function` | Use `Out.tag(el)\`template\`` for tagged template literals — `Out.to()` is for method chaining only |
 | Calling `signal.destroy()` from a subscriber | Destroys the signal for every other subscriber too | Only the page that owns the signal calls `destroy()` — subscribers just call the `off()` function they received from `subscribe()` |
+| `make.input(...).list(...)` | `TypeError: Cannot set property list` | `<input>` has a native read-only `list` property — `.list()` is skipped silently on void elements. Use a wrapper `make.div()` for list rendering |
+| `make.div({ class: ['card', 'elevated'] })` vs `make.div({ class: 'card elevated' })` | Both work — different intent | String sets `className` directly. Array calls `classList.add()`. Use string when the class expression is a single compound value, array when building it programmatically |
 
 ---
 
@@ -1373,7 +1518,7 @@ Now `engine.set()` writes into the same store that the rest of your app reads
 from, and `data-oja-bind` attributes in HTML update automatically when state
 changes.
 
-### Replacing innerHTML with engine.list()
+### Replacing innerHTML with find().list()
 
 Here is the notes list before:
 
@@ -1391,39 +1536,38 @@ effect(() => {
 ```
 
 Every time `tasks()` changes, every node is destroyed and rebuilt. Here is
-the same thing with `engine.list()`:
+the same thing with `find().list()`:
 
 ```js
 // pages/tasks.html — after
-import { engine, component } from '@agberohq/oja';
-
-const listEl = find('#task-list');
-
-function renderTask(task, existing) {
-    const el = existing || document.createElement('div');
-    el.className = 'task-item';
-    el.dataset.id = task.id;
-    el.querySelector('span').textContent = task.text;
-    return el;
-}
-
-effect(() => {
-    engine.list(listEl, tasks(), {
-        key:    t => t.id,
-        render: renderTask,
-        empty:  () => {
-            const el = document.createElement('p');
-            el.className = 'empty-hint';
-            el.textContent = 'No tasks yet — press N to add one';
-            return el;
-        },
-    });
+find('#task-list').list(() => tasks(), {
+    key:    t => t.id,
+    render: t => Out.c('components/task-item.html', t),
+    empty:  Out.h('<p class="empty-hint">No tasks yet — press N to add one</p>'),
 });
 ```
 
-`engine.list()` reconciles by key. When a task is added, only the new node is
-inserted. When one is removed, only that node is removed. Existing nodes are
-passed back to `render` as the second argument so you can update them in place.
+That's it. No `effect()` wrapper needed — passing a function as `items` makes
+it reactive automatically. No `document.createElement`. No manual DOM. The list
+re-reconciles whenever `tasks()` changes: only new nodes are inserted, only
+removed nodes are deleted, unchanged nodes are left alone.
+
+If you need fine-grained control over how existing nodes are updated, you can
+return a raw element from `render` instead of an Out. The existing element is
+passed as the second argument:
+
+```js
+find('#task-list').list(() => tasks(), {
+    key:    t => t.id,
+    render: (task, existing) => {
+        const el = existing || make.div({ class: 'task-item', data: { id: task.id } },
+            make.span({}, task.text),
+        );
+        if (existing) find('span', el).update({ text: task.text });
+        return el;
+    },
+});
+```
 
 ### Morphing the profile panel
 
@@ -1536,21 +1680,16 @@ and removing tasks all flow through the same path.
 
 ```js
 // pages/tasks.html
-import { on, engine }  from '@agberohq/oja';
-import { taskSearch }  from '../../app.js';
+import { on }         from '@agberohq/oja';
+import { taskSearch } from '../../app.js';
 
 const searchEl = find('#task-search');
-const listEl   = find('#task-list');
 
 function showTasks(items) {
-    engine.list(listEl, items, {
+    find('#task-list').list(items, {
         key:    t => t.id,
-        render: renderTask,
-        empty:  () => {
-            const el = document.createElement('p');
-            el.textContent = searchEl.value ? 'No matches' : 'No tasks yet';
-            return el;
-        },
+        render: t => Out.c('components/task-item.html', t),
+        empty:  Out.h(`<p>${searchEl.value ? 'No matches' : 'No tasks yet'}</p>`),
     });
 }
 
@@ -1561,13 +1700,12 @@ showTasks(tasks());
 on(searchEl, 'input', (e) => {
     const q = e.target.value.trim();
     if (!q) { showTasks(tasks()); return; }
-    const results = taskSearch.search(q);
-    showTasks(results.map(r => r.doc));
+    showTasks(taskSearch.search(q).map(r => r.doc));
 });
 ```
 
-The search box now filters the existing `engine.list()` reconciler — only
-changed nodes are patched, so the list never flickers.
+The search box filters the same `find().list()` reconciler — only changed
+nodes are patched, so the list never flickers.
 
 ### Tag autocomplete on the form
 
@@ -1582,23 +1720,23 @@ import { tasks } from '../../app.js';
 // Build a trie of every tag already in use
 const tagTrie = new Trie();
 for (const t of tasks()) {
-    if (t.tag) tagTrie.insert(t.tag);
+  if (t.tag) tagTrie.insert(t.tag);
 }
 
 const tagInput = find('#task-tag');
 
 // Path A — standalone
 const handle = autocomplete.attach(tagInput, {
-    source:   tagTrie,
-    limit:    6,
-    onSelect: (tag) => { tagInput.value = tag; },
+  source:   tagTrie,
+  limit:    6,
+  onSelect: (tag) => { tagInput.value = tag; },
 });
 
 // Path B — via form API (identical result)
 const handle = form.input(tagInput, {
-    source:   tagTrie,
-    limit:    6,
-    onSelect: (tag) => { tagInput.value = tag; },
+  source:   tagTrie,
+  limit:    6,
+  onSelect: (tag) => { tagInput.value = tag; },
 });
 
 // Clean up when the component unmounts
@@ -1616,10 +1754,10 @@ If your users misspell tags, enable fuzzy matching on the `Search` instance:
 
 ```js
 export const taskSearch = new Search([], {
-    fields:      ['text', 'tag'],
-    weights:     { text: 2, tag: 1 },
-    fuzzy:       true,
-    maxDistance: 1,
+  fields:      ['text', 'tag'],
+  weights:     { text: 2, tag: 1 },
+  fuzzy:       true,
+  maxDistance: 1,
 });
 ```
 
@@ -1644,14 +1782,14 @@ adds all of this in one call without replacing the data flow you already have.
 import { table } from '@agberohq/oja';
 
 const headers = [
-    { key: 'text',   label: 'Task',   sortable: true  },
-    { key: 'tag',    label: 'Tag',    sortable: true  },
-    { key: 'done',   label: 'Status', sortable: false },
+  { key: 'text',   label: 'Task',   sortable: true  },
+  { key: 'tag',    label: 'Tag',    sortable: true  },
+  { key: 'done',   label: 'Status', sortable: false },
 ];
 
 const t = table.render(find('#task-table'), tasks(), headers, {
-    pageSize:   10,
-    onRowClick: (row) => openTaskDetail(row),
+  pageSize:   10,
+  onRowClick: (row) => openTaskDetail(row),
 });
 ```
 
@@ -1665,7 +1803,7 @@ rebuilding the table from scratch:
 
 ```js
 effect(() => {
-    t.update(tasks());
+  t.update(tasks());
 });
 ```
 
@@ -1679,9 +1817,9 @@ you need richer output:
 
 ```js
 const rows = tasks().map(t => ({
-    text:   { value: t.text, onClick: () => openDetail(t) },
-    tag:    t.tag || '',
-    done:   { value: t.done ? 'Done' : 'Pending', badge: t.done ? 'success' : 'neutral' },
+  text:   { value: t.text, onClick: () => openDetail(t) },
+  tag:    t.tag || '',
+  done:   { value: t.done ? 'Done' : 'Pending', badge: t.done ? 'success' : 'neutral' },
 }));
 ```
 
@@ -1694,18 +1832,18 @@ Add per-row action buttons via the `actions` option:
 
 ```js
 const t = table.render(find('#task-table'), tasks(), headers, {
-    pageSize: 10,
-    actions: [
-        {
-            label:   'Complete',
-            onClick: (row) => markDone(row.id),
-        },
-        {
-            label:   'Delete',
-            onClick: (row) => deleteTask(row.id),
-            style:   'danger',
-        },
-    ],
+  pageSize: 10,
+  actions: [
+    {
+      label:   'Complete',
+      onClick: (row) => markDone(row.id),
+    },
+    {
+      label:   'Delete',
+      onClick: (row) => deleteTask(row.id),
+      style:   'danger',
+    },
+  ],
 });
 ```
 
@@ -1720,13 +1858,13 @@ on page change:
 
 ```js
 const t = table.render(find('#task-table'), [], headers, {
-    pageSize: 25,
-    fetchData: async (page, size, sortKey, dir) => {
-        const res = await api.get(
+  pageSize: 25,
+  fetchData: async (page, size, sortKey, dir) => {
+    const res = await api.get(
             `/tasks?page=${page}&size=${size}&sort=${sortKey}&dir=${dir}`
-        );
-        return { data: res.rows, total: res.total };
-    },
+    );
+    return { data: res.rows, total: res.total };
+  },
 });
 ```
 
