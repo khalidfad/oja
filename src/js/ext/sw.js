@@ -146,4 +146,39 @@ export const sw = {
     get supported() {
         return 'serviceWorker' in navigator;
     },
+
+    /**
+     * Register an application service worker and optionally send it a list
+     * of assets to precache. This is a convenience wrapper over register()
+     * and send() for the common offline-first app pattern.
+     *
+     * The SW script must handle the PRECACHE message:
+     *   self.addEventListener('message', e => {
+     *     if (e.data.type === 'PRECACHE') caches.open('v1').then(c => c.addAll(e.data.assets));
+     *   });
+     *
+     *   await sw.registerAppWorker('./sw.js', [
+     *     './index.html',
+     *     './js/app.js',
+     *     'https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js',
+     *   ]);
+     *
+     * @param {string}   scriptUrl  — path to the service worker script
+     * @param {string[]} [assets]   — optional list of URLs to precache on activation
+     * @param {Object}   [options]  — options passed to navigator.serviceWorker.register()
+     * @returns {Promise<ServiceWorkerRegistration|null>}
+     */
+    async registerAppWorker(scriptUrl, assets = [], options = {}) {
+        if (!('serviceWorker' in navigator)) return null;
+
+        const reg = await sw.register(scriptUrl, options);
+        if (!reg) return null;
+
+        if (assets.length > 0) {
+            // Send precache list to the SW — fire and forget, non-fatal if ignored
+            sw.post({ type: 'PRECACHE', assets });
+        }
+
+        return reg;
+    },
 };
