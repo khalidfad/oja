@@ -434,6 +434,104 @@ export class Search {
     }
 
     /**
+     * Search with result context — extends search() to include snippet text
+     * and character-level match positions for highlight rendering.
+     *
+     * @param {string} query
+     * @param {Object} opts
+     *   snippetLen : number   Characters of context around the first match (default 140)
+     *   ...plus all search() overrides
+     * @returns {Array<{ id, doc, score, matches, snippets: [{ field, text, positions }] }>}
+     *
+     *   // Render with highlights:
+     *   const results = search.searchWithContext('dance');
+     *   for (const r of results) {
+     *     const s = r.snippets[0];
+     *     if (s) el.innerHTML = Search.highlightSnippet(s.text, s.positions);
+     *   }
+     */
+    searchWithContext(query, opts = {}) {
+        const { snippetLen = 140, ...searchOpts } = opts;
+        const results = this.search(query, searchOpts);
+        if (!query?.trim() || !results.length) return results;
+
+        const terms = _tokenize(query.toLowerCase());
+
+        return results.map(result => {
+            const { doc } = result;
+            const snippets = [];
+            const fieldsHit = new Set(result.matches.map(m => m.field).filter(Boolean));
+
+            for (const field of fieldsHit) {
+                const text = doc[field];
+                if (!text || typeof text !== 'string') continue;
+                const lower = text.toLowerCase();
+                const positions = [];
+
+                for (const term of terms) {
+                    let idx = 0;
+                    while (true) {
+                        const i = lower.indexOf(term, idx);
+                        if (i === -1) break;
+                        positions.push({ start: i, end: i + term.length, term });
+                        idx = i + term.length;
+                    }
+                }
+
+                if (!positions.length) continue;
+
+                // Build snippet window around the first match
+                const first = positions[0];
+                const center = Math.floor((first.start + first.end) / 2);
+                const from   = Math.max(0, center - Math.floor(snippetLen / 2));
+                const to     = Math.min(text.length, from + snippetLen);
+                const prefix = from > 0 ? '…' : '';
+                const suffix = to < text.length ? '…' : '';
+                const snippet = prefix + text.slice(from, to) + suffix;
+
+                // Positions relative to snippet
+                const offset = from - (prefix ? 1 : 0);
+                const relPositions = positions
+                    .filter(p => p.start >= from && p.end <= to)
+                    .map(p => ({ start: p.start - from + (prefix ? 1 : 0), end: p.end - from + (prefix ? 1 : 0), term: p.term }));
+
+                snippets.push({ field, text: snippet, positions: relPositions });
+            }
+
+            return { ...result, snippets };
+        });
+    }
+
+    /**
+     * Convert a snippet string and its match positions into an HTML string
+     * with <mark class="search-hit"> tags around each matched region.
+     * Safe — escapes HTML in the surrounding text.
+     *
+     * @param {string} text       — the snippet text (from searchWithContext)
+     * @param {Array}  positions  — [{ start, end }] from searchWithContext
+     * @returns {string}          — HTML string, safe to set as innerHTML
+     */
+    static highlightSnippet(text, positions = []) {
+        if (!text) return '';
+        if (!positions.length) return _escHtml(text);
+
+        const sorted = [...positions].sort((a, b) => a.start - b.start);
+        let out = '';
+        let cursor = 0;
+
+        for (const { start, end } of sorted) {
+            if (start >= cursor) {
+                out += _escHtml(text.slice(cursor, start));
+                out += `<mark class="search-hit">${_escHtml(text.slice(start, end))}</mark>`;
+                cursor = end;
+            }
+        }
+
+        out += _escHtml(text.slice(cursor));
+        return out;
+    }
+
+    /**
      * Return a document by id, or null if not found.
      */
     get(id) {
@@ -530,6 +628,14 @@ export class Search {
 }
 
 // ─── Module-level pure helpers ────────────────────────────────────────────────
+
+// Escape HTML for safe innerHTML injection in highlightSnippet().
+function _escHtml(str) {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
 
 // Split text on whitespace and common separators; discard empty tokens.
 function _tokenize(text) {
