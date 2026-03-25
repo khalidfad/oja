@@ -47,7 +47,69 @@
 
 import { emit as _emit, listen as _listen } from '../core/events.js';
 
-const _registered = new Set();
+// ─── First-party Oja event catalogue ─────────────────────────────────────────
+// All events emitted internally by Oja modules are pre-registered here.
+// Apps that call events.register([...]) + events.strictMode(true) will get
+// validation on their own events AND catch typos in Oja's built-in names.
+const _OJA_EVENTS = [
+    // Router
+    'oja:navigate:start',
+    'oja:navigate:end',
+    'oja:navigate',
+    // Component
+    'component:mounted',
+    'component:added',
+    'component:removed',
+    'component:updated',
+    'component:cache-hit',
+    'component:cache-miss',
+    'component:cached',
+    'component:cache-evict',
+    'component:slow-render',
+    'component:dead',
+    // Layout
+    'layout:mounted',
+    'layout:updated',
+    'layout:slot',
+    'layout:slot-ready',
+    'layout:unmounted',
+    'layout:injected',
+    // Out / rendering
+    'out:fetch-start',
+    'out:fetch-end',
+    'out:fetch-error',
+    'out:component-rendered',
+    'out:cache-hit',
+    'out:vfs-hit',
+    'out:image-loaded',
+    'out:image-error',
+    // Api
+    'api:error',
+    'api:queued',
+    'api:unauthorized',
+    'api:online',
+    'api:offline',
+    // Notify
+    'notify:toast',
+    'notify:banner',
+    // Modal
+    'modal:open',
+    'modal:close',
+    // Runtime
+    'runtime:error',
+    'runtime:destroy',
+    // Uploader
+    'uploader:started',
+    'uploader:progress',
+    'uploader:complete',
+    'uploader:error',
+    'uploader:paused',
+    'uploader:resumed',
+    'uploader:canceled',
+    'uploader:added',
+];
+
+const _registered = new Set(_OJA_EVENTS); // pre-seeded with all first-party events
 let   _strict     = false;
 let   _active     = false;   // true once register() has been called at least once
 
