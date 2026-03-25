@@ -1,7 +1,7 @@
 // src/js/core/runtime.js
 /**
  * oja/runtime.js
- * Passive configuration store and hook registry.
+ * Passive configuration store, hook registry, and unified event bus gateway.
  *
  * Never pulls — every other module pushes through it or reads from it.
  * No opinions about what your app does.
@@ -18,6 +18,37 @@
  *     .onFetch((url, opts) => ({ ...opts, headers: { ...opts.headers, 'X-App': '1' } }))
  *     .onError((err, source) => logger.capture(err, source))
  *     .ready(() => router.start());
+ *
+ * ─── Unified event bus ────────────────────────────────────────────────────────
+ *
+ *   runtime is the single subscription point for all Oja internal events.
+ *   All modules (component, layout, out, router, api) emit on the same bus.
+ *
+ *   // Subscribe to any Oja event — no need to import events.js directly
+ *   const off = runtime.on('component:mounted', ({ url, ms }) => console.log(url));
+ *   const off = runtime.on('oja:navigate:start', ({ path }) => progress.start());
+ *   const off = runtime.on('out:fetch-start',    ({ url }) => ...);
+ *   off(); // unsubscribe
+ *
+ *   // Emit custom app events through the same bus
+ *   runtime.emit('app:ready', { user });
+ *
+ *   // Remove a specific handler
+ *   runtime.off('component:mounted', handler);
+ *
+ * ─── Full event catalogue ─────────────────────────────────────────────────────
+ *
+ *   Router:    oja:navigate:start  oja:navigate:end  oja:navigate
+ *   Component: component:mounted  component:added  component:removed
+ *              component:updated  component:cache-hit  component:cache-miss
+ *              component:slow-render  component:dead
+ *   Layout:    layout:mounted  layout:updated  layout:slot  layout:slot-ready
+ *              layout:unmounted  layout:injected
+ *   Out:       out:fetch-start  out:fetch-end  out:fetch-error
+ *              out:component-rendered  out:cache-hit  out:vfs-hit
+ *   Api:       api:error  api:queued  api:unauthorized  api:online  api:offline
+ *   Notify:    notify:toast  notify:banner
+ *   Runtime:   runtime:error  runtime:destroy
  *
  * ─── Security ─────────────────────────────────────────────────────────────────
  *
@@ -62,6 +93,8 @@
  *   runtime.runNavigateHooks(nav)          — fires all onNavigate hooks; honours cancel/redirect
  */
 
+import { emit as _busEmit, listen as _busListen, off as _busOff } from './events.js';
+
 const VALID_ENVS = new Set(['development', 'production', 'test']);
 
 function _createRuntime() {
@@ -77,6 +110,7 @@ function _createRuntime() {
     const _errorHooks    = [];
     const _navigateHooks = [];
     const _readyQueue    = [];
+    const _busUnsubs     = new Map(); // name → Map<fn, unsub> for runtime.off()
     let   _domReady      = false;
 
     // ── DOM ready bootstrap ─────────────────────────────────────────────────
@@ -237,6 +271,63 @@ function _createRuntime() {
             return this;
         },
 
+        // ─── Unified event bus ──────────────────────────────────────────────
+
+        /**
+         * Subscribe to any Oja event on the unified bus.
+         * Returns an unsubscribe function — call it to remove the handler.
+         *
+         *   const off = runtime.on('component:mounted', ({ url }) => ...);
+         *   const off = runtime.on('oja:navigate:start', ({ path }) => ...);
+         *   off(); // unsubscribe
+         *
+         * @param {string}   name — event name
+         * @param {Function} fn   — handler receives the event detail object
+         * @returns {Function}    — unsubscribe
+         */
+        on(name, fn) {
+            const unsub = _busListen(name, fn);
+            // Track unsub by name+fn so runtime.off(name, fn) can remove it
+            if (!_busUnsubs.has(name)) _busUnsubs.set(name, new Map());
+            _busUnsubs.get(name).set(fn, unsub);
+            return unsub;
+        },
+
+        /**
+         * Remove a specific handler registered via runtime.on().
+         * Alternatively just call the unsubscribe function returned by on().
+         *
+         *   runtime.off('component:mounted', handler);
+         *
+         * @param {string}   name
+         * @param {Function} fn
+         * @returns {this}
+         */
+        off(name, fn) {
+            const unsub = _busUnsubs.get(name)?.get(fn);
+            if (unsub) {
+                unsub();
+                _busUnsubs.get(name).delete(fn);
+            }
+            return this;
+        },
+
+        /**
+         * Emit a named event on the unified bus.
+         * Use for custom app events — all Oja modules emit on the same bus automatically.
+         *
+         *   runtime.emit('app:ready', { user });
+         *   runtime.emit('hosts:refresh');
+         *
+         * @param {string} name
+         * @param {Object} [detail]
+         * @returns {this}
+         */
+        emit(name, detail = {}) {
+            _busEmit(name, detail);
+            return this;
+        },
+
         // ─── Lifecycle ─────────────────────────────────────────────────────
 
         /**
@@ -291,6 +382,14 @@ function _createRuntime() {
             _origins   = [];
             _sandboxed = false;
             _env       = 'development';
+
+            // Unsubscribe all listeners registered via runtime.on()
+            for (const fnMap of _busUnsubs.values()) {
+                for (const unsub of fnMap.values()) {
+                    try { unsub(); } catch (_) {}
+                }
+            }
+            _busUnsubs.clear();
 
             if (typeof document !== 'undefined') {
                 document.dispatchEvent(new CustomEvent('runtime:destroy'));
