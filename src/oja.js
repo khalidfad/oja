@@ -62,6 +62,7 @@ export {
     ui,
     find, findAll, findAllIn,
     query, queryAll,
+    make,
     createEl, empty, removeEl,
     afterEl, beforeEl, toggleEl,
     matches, closest,
@@ -107,7 +108,7 @@ export const VERSION = '0.0.1';
 // ─── Grouped exports — one import, dot-access ─────────────────────────────────
 import { timeout, interval, sleep, defer, withDefer }    from './js/core/system.js';
 import { state, effect, derived, batch, context,
-    watch, untrack, readonly, signal }                   from './js/core/reactive.js';
+    watch, untrack, readonly, channel }                   from './js/core/reactive.js';
 import { on, once, off, emit, listen, listenOnce, waitFor,
     debounce, throttle, rafThrottle, keys,
     onScroll, onScrollDirection, isInViewport, getViewportPosition,
@@ -115,6 +116,7 @@ import { on, once, off, emit, listen, listenOnce, waitFor,
     onResize, onMutation,
     onlyOnce, onClickOutside, onHover, onLongPress }      from './js/core/events.js';
 import { ui, find, findAll, findAllIn, query, queryAll,
+    make,
     createEl, empty, removeEl,
     afterEl, beforeEl, toggleEl,
     matches, closest }                                    from './js/core/ui.js';
@@ -147,6 +149,7 @@ export const DOM = {
     ui,
     find, findAll, findAllIn,
     query, queryAll,
+    make,
     createEl, empty, removeEl,
     afterEl, beforeEl, toggleEl,
     matches, closest,
@@ -166,6 +169,7 @@ export const Oja = {
     DOM, ui,
     find, findAll, findAllIn,
     query, queryAll,
+    make,
     createEl, empty, removeEl,
     afterEl, beforeEl, toggleEl,
     matches, closest,

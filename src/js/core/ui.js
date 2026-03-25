@@ -94,6 +94,7 @@
  */
 
 import { listen, emit } from './events.js';
+import { effect }       from './reactive.js';
 
 export function find(selector, options = {}) {
     const { required = false, scope = document, timeout = 0 } = options;
@@ -139,7 +140,7 @@ export function find(selector, options = {}) {
 }
 
 export function findAll(selector, scope = document) {
-    return Array.from(scope.querySelectorAll(selector));
+    return Array.from(scope.querySelectorAll(selector)).map(_renderable);
 }
 
 /**
@@ -189,7 +190,7 @@ export function query(selector, scope = document) {
  * @returns {Element[]}
  */
 export function queryAll(selector, scope = document) {
-    return Array.from((scope || document).querySelectorAll(selector));
+    return Array.from((scope || document).querySelectorAll(selector)).map(_renderable);
 }
 
 export function findAllIn(scope, selectors, options = {}) {
@@ -234,6 +235,183 @@ export function createEl(tag, attrs = {}) {
 
     return _renderable(el);
 }
+
+/**
+ * make(html, options?) — create a DOM element from an HTML string and
+ * optionally append it to a parent (defaults to document.body).
+ *
+ * Useful in component scripts and tests — a one-liner that replaces the
+ * three-step createElement / innerHTML / appendChild pattern.
+ *
+ *   const card = make('<div class="card"><p>Hello</p></div>');
+ *   const row  = make('<tr><td>Alice</td></tr>', { parent: find('#table-body') });
+ *
+ * Returns the first child element so you get the actual node, not a wrapper.
+ * If the HTML has multiple root elements, returns a DocumentFragment instead.
+ *
+ * @param {string}   html           — HTML string to parse
+ * @param {Object}   [options]
+ * @param {Element}  [options.parent=document.body] — element to append into
+ * @returns {Element|DocumentFragment}
+ */
+/**
+ * make(tag, options?, ...children) — programmatic DOM builder.
+ *
+ * Creates an element, applies options, appends children, and returns an
+ * enhanced element with .update(), .list(), .render(), and placement methods
+ * (.appendTo, .prependTo, .after, .before, .replace).
+ *
+ * The first argument after `tag` is optional — if it is not a plain object
+ * (or is a string / Element / array), it is treated as a child, not options.
+ *
+ * ─── Options ────────────────────────────────────────────────────────────────
+ *
+ *   class  : string | string[]          — className
+ *   id     : string                     — element id
+ *   style  : object                     — inline styles
+ *   attrs  : object                     — arbitrary HTML attributes
+ *   data   : object                     — data-* attributes (key → data-key)
+ *   on     : object                     — event listeners { click: fn, ... }
+ *   text   : string                     — textContent shorthand
+ *   html   : string                     — innerHTML shorthand
+ *
+ * ─── Children ───────────────────────────────────────────────────────────────
+ *
+ *   string | number  → text node
+ *   Element          → appended directly
+ *   Array            → each item appended
+ *
+ * ─── Placement (on the returned element) ────────────────────────────────────
+ *
+ *   .appendTo(target)   — append as last child of target
+ *   .prependTo(target)  — prepend as first child of target
+ *   .after(target)      — insert immediately after target (as next sibling)
+ *   .before(target)     — insert immediately before target (as prev sibling)
+ *   .replace(target)    — replace target with this element
+ *
+ *   All placement methods accept a CSS selector string or an Element.
+ *   All return `this` so the chain continues.
+ *
+ * ─── Examples ───────────────────────────────────────────────────────────────
+ *
+ *   make.div({ class: 'card', data: { id: host.id } },
+ *       make.h2({ class: 'title' }, host.name),
+ *       make.p({ style: { color: 'var(--text-mute)' } }, host.status),
+ *       make.button({ class: 'btn-danger', on: { click: () => del(host.id) } }, 'Delete'),
+ *   ).appendTo('#host-list');
+ *
+ *   // Enhance an existing element
+ *   make(document.getElementById('legacy')).appendTo('#new-container');
+ *
+ * @param {string|Element} tag
+ * @param {Object|string|Element|Array} [optionsOrChild]
+ * @param {...(string|number|Element|Array)} children
+ * @returns {Element} — enhanced with update/list/render/placement methods
+ */
+export function make(tag, optionsOrChild, ...rest) {
+    // Allow make(existingElement) to just enhance and return it
+    if (tag instanceof Element) {
+        return _renderable(tag);
+    }
+
+    const el = document.createElement(tag);
+
+    // Determine if second arg is options or a child
+    let options = {};
+    let children = rest;
+
+    if (optionsOrChild !== undefined) {
+        const isOptions = optionsOrChild !== null
+            && typeof optionsOrChild === 'object'
+            && !Array.isArray(optionsOrChild)
+            && !(optionsOrChild instanceof Element)
+            && !(optionsOrChild instanceof Node);
+
+        if (isOptions) {
+            options = optionsOrChild;
+        } else {
+            children = [optionsOrChild, ...rest];
+        }
+    }
+
+    // ── Apply options ──────────────────────────────────────────────────────
+
+    if (options.id) el.id = options.id;
+
+    if (options.class) {
+        if (Array.isArray(options.class)) {
+            el.classList.add(...options.class.filter(Boolean));
+        } else {
+            // String — assign directly so 'card active' works as-is
+            el.className = options.class;
+        }
+    }
+
+    if (options.style) {
+        Object.assign(el.style, options.style);
+    }
+
+    if (options.attrs) {
+        for (const [k, v] of Object.entries(options.attrs)) {
+            if (v !== null && v !== undefined) el.setAttribute(k, String(v));
+        }
+    }
+
+    if (options.data) {
+        for (const [k, v] of Object.entries(options.data)) {
+            if (v !== null && v !== undefined) el.dataset[k] = String(v);
+        }
+    }
+
+    if (options.on) {
+        for (const [event, handler] of Object.entries(options.on)) {
+            if (typeof handler === 'function') el.addEventListener(event, handler);
+        }
+    }
+
+    if (options.html !== undefined) {
+        el.innerHTML = options.html;
+    } else if (options.text !== undefined) {
+        el.textContent = String(options.text);
+    }
+
+    // ── Append children ────────────────────────────────────────────────────
+
+    const _append = (child) => {
+        if (child === null || child === undefined) return;
+        if (typeof child === 'string' || typeof child === 'number') {
+            el.appendChild(document.createTextNode(String(child)));
+        } else if (child instanceof Node) {
+            el.appendChild(child);
+        } else if (Array.isArray(child)) {
+            child.forEach(_append);
+        }
+    };
+
+    children.forEach(_append);
+
+    return _renderable(el);
+}
+
+// ── Shorthand factories ────────────────────────────────────────────────────
+// make.div(...), make.span(...), make.button(...) etc.
+// Each accepts the same (options?, ...children) signature as make().
+
+const _TAGS = [
+    'div', 'span', 'p', 'a', 'button', 'input', 'textarea', 'select',
+    'form', 'label', 'img', 'svg',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'ul', 'ol', 'li',
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
+    'section', 'article', 'aside', 'header', 'footer', 'main', 'nav',
+    'figure', 'figcaption', 'blockquote', 'pre', 'code',
+    'strong', 'em', 'small', 'mark', 'del', 'ins',
+    'details', 'summary', 'dialog',
+];
+
+_TAGS.forEach(tag => {
+    make[tag] = (optionsOrChild, ...rest) => make(tag, optionsOrChild, ...rest);
+});
 
 export function empty(target) {
     const el = typeof target === 'string' ? document.querySelector(target) : target;
@@ -561,20 +739,265 @@ function _esc(str) {
  * Bridges the gap between ui.js helpers and Oja Responders.
  */
 function _renderable(el) {
-    if (el && !el.render) {
-        el.render = function(responder) {
-            if (responder && typeof responder.render === 'function') {
-                responder.render(el);
+    if (!el || el.__oja_enhanced__) return el;
+    el.__oja_enhanced__ = true;
+
+    // Helper — safely define a property only if it is not a read-only native.
+    // HTMLInputElement.list, HTMLSelectElement.form, etc. are native getters
+    // that throw if you try to assign to them directly.
+    const _define = (name, fn) => {
+        const desc = Object.getOwnPropertyDescriptor(el, name)
+            || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), name)
+            || Object.getOwnPropertyDescriptor(HTMLElement.prototype, name);
+        if (desc && desc.set === undefined && desc.writable === false) return;
+        try { el[name] = fn; } catch (_) { /* native read-only — skip */ }
+    };
+
+    // ── Placement helpers ─────────────────────────────────────────────────────
+    // All accept a CSS selector string or an Element. All return `this`.
+
+    const _resolveTarget = (target) =>
+        typeof target === 'string' ? document.querySelector(target) : target;
+
+    /** Append as last child of target. */
+    _define('appendTo', function(target) {
+        const t = _resolveTarget(target);
+        if (t) t.appendChild(el);
+        else console.warn('[oja/make] appendTo: target not found:', target);
+        return el;
+    });
+
+    /** Prepend as first child of target. */
+    _define('prependTo', function(target) {
+        const t = _resolveTarget(target);
+        if (t) t.prepend(el);
+        else console.warn('[oja/make] prependTo: target not found:', target);
+        return el;
+    });
+
+    /** Insert immediately after target (as next sibling). */
+    _define('after', function(target) {
+        const t = _resolveTarget(target);
+        if (t?.parentNode) t.parentNode.insertBefore(el, t.nextSibling);
+        else console.warn('[oja/make] after: target not found:', target);
+        return el;
+    });
+
+    /** Insert immediately before target (as previous sibling). */
+    _define('before', function(target) {
+        const t = _resolveTarget(target);
+        if (t?.parentNode) t.parentNode.insertBefore(el, t);
+        else console.warn('[oja/make] before: target not found:', target);
+        return el;
+    });
+
+    /** Replace target entirely with this element. */
+    _define('replace', function(target) {
+        const t = _resolveTarget(target);
+        if (t?.parentNode) t.parentNode.replaceChild(el, t);
+        else console.warn('[oja/make] replace: target not found:', target);
+        return el;
+    });
+
+    // ── el.render(out) ────────────────────────────────────────────────────────
+    // Original render — accepts any Out and renders it into the element.
+    _define('render', function(responder) {
+        if (responder && typeof responder.render === 'function') {
+            responder.render(el);
+        }
+        return el;
+    });
+
+    // ── el.update(descriptor) ─────────────────────────────────────────────────
+    //
+    // Declarative patch — describe what the element should look like.
+    // Any key whose value is a function that reads signals is automatically
+    // wrapped in effect() and re-runs whenever those signals change.
+    //
+    // Supported keys:
+    //   text      : string | () => string          — sets textContent
+    //   html      : string | () => string          — sets innerHTML
+    //   out       : Out    | () => Out             — renders any Out
+    //   component : string (url), data?: object    — shorthand for out: Out.c(...)
+    //   fn        : async (el) => void | Out       — full control; return Out or mutate directly
+    //   class     : { add?, remove?, toggle? } | () => same
+    //   attr      : { key: value|null } | () => same — null removes the attribute
+    //   style     : { prop: value } | () => same
+    //
+    // Examples:
+    //
+    //   find('#badge').update({ text: 'Online', class: { add: 'badge-success' } });
+    //
+    //   find('#panel').update({ out: Out.c('components/detail.html', { host }) });
+    //
+    //   find('#panel').update({ component: 'components/detail.html', data: { host } });
+    //
+    //   find('#count').update({ text: () => `${tasks().length} tasks` }); // reactive
+    //
+    //   find('#chart').update({
+    //       fn: async (el) => {
+    //           const data = await api.get('/metrics');
+    //           return Out.timeSeries(data.series, { height: 80 });
+    //       },
+    //   });
+    //
+    _define('update', function(descriptor = {}) {
+        const _applyOnce = async (desc) => {
+            // ── class ─────────────────────────────────────────────────────────
+            if (desc.class) {
+                const cls = typeof desc.class === 'function' ? desc.class() : desc.class;
+                if (cls.add)    [].concat(cls.add).forEach(c => c && el.classList.add(c));
+                if (cls.remove) [].concat(cls.remove).forEach(c => c && el.classList.remove(c));
+                if (cls.toggle) [].concat(cls.toggle).forEach(c => c && el.classList.toggle(c));
             }
-            return el;
+
+            // ── attr ──────────────────────────────────────────────────────────
+            if (desc.attr) {
+                const attrs = typeof desc.attr === 'function' ? desc.attr() : desc.attr;
+                for (const [k, v] of Object.entries(attrs)) {
+                    if (v === null || v === undefined) el.removeAttribute(k);
+                    else el.setAttribute(k, String(v));
+                }
+            }
+
+            // ── style ─────────────────────────────────────────────────────────
+            if (desc.style) {
+                const styles = typeof desc.style === 'function' ? desc.style() : desc.style;
+                Object.assign(el.style, styles);
+            }
+
+            // ── content — text / html / out / component / fn ──────────────────
+            if (desc.fn !== undefined) {
+                const result = await desc.fn(el);
+                if (result && typeof result.render === 'function') {
+                    await result.render(el);
+                }
+            } else if (desc.out !== undefined) {
+                const out = typeof desc.out === 'function' ? desc.out() : desc.out;
+                if (out && typeof out.render === 'function') await out.render(el);
+            } else if (desc.component !== undefined) {
+                // Lazy import to avoid circular dep at module parse time
+                const { Out } = await import('./out.js');
+                const out = Out.component(desc.component, desc.data || {});
+                await out.render(el);
+            } else if (desc.html !== undefined) {
+                const val = typeof desc.html === 'function' ? desc.html() : desc.html;
+                el.innerHTML = val;
+            } else if (desc.text !== undefined) {
+                const val = typeof desc.text === 'function' ? desc.text() : desc.text;
+                el.textContent = val;
+            }
         };
-    }
+
+        // Determine if any value is a function (potential signal reader).
+        // If so, wrap the whole descriptor application in effect() so it
+        // re-runs automatically when any signal it reads changes.
+        const hasReactive = Object.values(descriptor).some(v => typeof v === 'function');
+
+        if (hasReactive) {
+            effect(() => { _applyOnce(descriptor); });
+        } else {
+            _applyOnce(descriptor);
+        }
+
+        return el;
+    });
+
+    // ── el.list(items, options) ───────────────────────────────────────────────
+    //
+    // Keyed list reconciliation — shorthand over engine.list().
+    // Only changed nodes are patched. Existing nodes are passed back to
+    // render() as the second argument so you can update them in place.
+    //
+    //   find('#task-list').list(tasks(), {
+    //       key:    t => t.id,
+    //       render: t => Out.c('components/task.html', t),  // returns an Out
+    //       empty:  Out.h('<p>No tasks yet</p>'),
+    //   });
+    //
+    //   // Reactive — re-reconciles when tasks() signal changes
+    //   find('#task-list').list(() => tasks(), {
+    //       key:    t => t.id,
+    //       render: t => Out.c('components/task.html', t),
+    //       empty:  Out.h('<p>No tasks yet</p>'),
+    //   });
+    //
+    _define('list', function(itemsOrSignal, options = {}) {
+        const { key, render: renderFn, empty } = options;
+
+        if (!renderFn) {
+            console.warn('[oja/ui] el.list() requires a render function');
+            return el;
+        }
+
+        const _reconcile = async (items) => {
+            if (!items || items.length === 0) {
+                el.innerHTML = '';
+                if (empty) {
+                    const out = typeof empty === 'function' && !empty.__isOjaSignal
+                        ? empty()
+                        : empty;
+                    if (out && typeof out.render === 'function') {
+                        await out.render(el);
+                    } else if (typeof out === 'string') {
+                        el.innerHTML = out;
+                    }
+                }
+                return;
+            }
+
+            // Build a map of existing keyed nodes
+            const existing = new Map();
+            if (key) {
+                Array.from(el.children).forEach(child => {
+                    const k = child.dataset.listKey;
+                    if (k !== undefined) existing.set(k, child);
+                });
+            }
+
+            // Render each item
+            const fragment = document.createDocumentFragment();
+            for (const item of items) {
+                const k = key ? String(key(item)) : null;
+                const existingEl = k ? existing.get(k) : null;
+
+                const out = renderFn(item, existingEl);
+
+                if (out && typeof out.render === 'function') {
+                    // Out returned — render into a slot
+                    const slot = existingEl || document.createElement('div');
+                    if (k) slot.dataset.listKey = k;
+                    if (!existingEl) await out.render(slot);
+                    else await out.render(slot); // re-render in place
+                    fragment.appendChild(slot);
+                } else if (out instanceof Element) {
+                    // Raw element returned
+                    if (k) out.dataset.listKey = k;
+                    fragment.appendChild(out);
+                }
+            }
+
+            el.innerHTML = '';
+            el.appendChild(fragment);
+        };
+
+        // If itemsOrSignal is a function, treat it as a signal — wrap in effect()
+        if (typeof itemsOrSignal === 'function' && !itemsOrSignal.__isOjaOut) {
+            effect(() => { _reconcile(itemsOrSignal()); });
+        } else {
+            _reconcile(itemsOrSignal);
+        }
+
+        return el;
+    });
+
     return el;
 }
 
 ui.find = find;
 ui.findAll = findAll;
 ui.findAllIn = findAllIn;
+ui.make = make;
 ui.createEl = createEl;
 ui.empty = empty;
 ui.remove = removeEl;
