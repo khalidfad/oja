@@ -97,10 +97,11 @@
  *   router.params();  // → { filter: 'alive', sort: 'name', ...routeParams }
  */
 
-import { Store }     from './store.js';
-import { Out }       from './out.js';
-import { component } from './component.js';
-import { runtime }   from './runtime.js';
+import { Store }          from './store.js';
+import { Out }            from './out.js';
+import { component }      from './component.js';
+import { runtime }        from './runtime.js';
+import { emit as _emit }  from './events.js';
 
 const _store = new Store('oja:router');
 
@@ -160,8 +161,8 @@ export class Router {
         this._beforeEach       = [];
         this._afterEach        = [];
         this._prefetchEnabled  = prefetch;
-        this._namedRoutes      = new Map(); // name → pattern
-        this._urlHandler       = null;      // stored for destroy()
+        this._namedRoutes      = new Map(); // F-31: name → pattern
+        this._urlHandler       = null;      // L-03: stored for destroy()
 
         // Register VFS with Out so all component fetches check local store first.
         // Can also be set independently via Out.vfsUse(vfs) before router.start().
@@ -321,16 +322,19 @@ export class Router {
 
     /**
      * Create a scoped sub-router at a path prefix.
-     * The group inherits parent middleware and can add its own.
+     * The group shares the parent's navigate(), named routes, and lifecycle —
+     * it is a proxy, not a new Router instance.
+     *
+     *   const app = r.Group('/app');
+     *   app.Use(auth.middleware());
+     *   app.Get('/hosts', Out.c('pages/hosts.html'));   // → /app/hosts
+     *
+     *   // Nested
+     *   const hosts = app.Group('/hosts');
+     *   hosts.Get('/{id}', Out.c('pages/host.html')); // → /app/hosts/{id}
      */
     Group(prefix, fn) {
-        const groupRoot = this._findOrCreate(prefix);
-        const group     = new Router({ mode: this._mode, outlet: this._outlet });
-        group._root             = groupRoot;
-        group._globalMiddleware = [...this._globalMiddleware];
-        group._notFound         = this._notFound;
-        group._errorResponder   = this._errorResponder;
-        group._prefetchEnabled  = this._prefetchEnabled;
+        const group = new _GroupProxy(this, prefix, [...this._globalMiddleware]);
         if (fn) fn(group);
         return group;
     }
@@ -339,13 +343,7 @@ export class Router {
      * Register a nested route block — used for URL param segments.
      */
     Route(pattern, fn) {
-        const node = this._findOrCreate(pattern);
-        const sub  = new Router({ mode: this._mode, outlet: this._outlet });
-        sub._root             = node;
-        sub._globalMiddleware = [...this._globalMiddleware];
-        sub._notFound         = this._notFound;
-        sub._errorResponder   = this._errorResponder;
-        sub._prefetchEnabled  = this._prefetchEnabled;
+        const sub = new _GroupProxy(this, pattern, [...this._globalMiddleware]);
         fn(sub);
         return this;
     }
@@ -426,7 +424,7 @@ export class Router {
 
         if (!options._replace) this._pushURL(pathname, query);
 
-        document.dispatchEvent(new CustomEvent('oja:navigate:start', { detail: { path: pathname } }));
+        _emit('oja:navigate:start', { path: pathname });
 
         if (this._loadingResponder && container) {
             container.innerHTML = '';
@@ -551,13 +549,8 @@ export class Router {
 
         if (currentNavId !== this._navId) return;
 
-        document.dispatchEvent(new CustomEvent('oja:navigate:end', {
-            detail: { path: pathname, params: ctx.params },
-        }));
-
-        document.dispatchEvent(new CustomEvent('oja:navigate', {
-            detail: { path: pathname, params: ctx.params },
-        }));
+        _emit('oja:navigate:end',  { path: pathname, params: ctx.params });
+        _emit('oja:navigate',      { path: pathname, params: ctx.params });
     }
 
     async _render(responder, ctx) {
@@ -770,6 +763,82 @@ export class Router {
             route:      '/' + routeSegs.join('/'),
         };
     }
+}
+
+// ─── Group proxy ──────────────────────────────────────────────────────────────
+// A lightweight proxy over a parent Router that scopes route registration to a
+// path prefix. Does NOT create a new Router instance — all navigation, named
+// routes, and lifecycle stay on the parent. This means:
+//   - group.name() registers on the parent → visible to parent.navigate()
+//   - group.Use() adds to the group's own middleware stack, not the parent's
+//   - group.Get('/foo') registers at prefix + '/foo' in the parent's trie
+
+class _GroupProxy {
+    constructor(parent, prefix, inheritedMiddleware = []) {
+        this._parent     = parent;
+        this._prefix     = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+        this._middleware = [...inheritedMiddleware];
+    }
+
+    // Resolve a group-relative path to a full path
+    _full(pattern) {
+        if (!pattern || pattern === '/') return this._prefix || '/';
+        const p = pattern.startsWith('/') ? pattern : '/' + pattern;
+        return this._prefix + p;
+    }
+
+    Use(...middlewares) {
+        for (const mw of middlewares.flat()) {
+            if (typeof mw === 'function') this._middleware.push(mw);
+        }
+        return this;
+    }
+
+    Get(pattern, responderOrChain) {
+        const { responder, middleware } = _unwrapChain(responderOrChain);
+        this._parent._addRoute(this._full(pattern), responder, [
+            ...this._middleware,
+            ...middleware,
+        ]);
+        return this;
+    }
+
+    Group(prefix, fn) {
+        const group = new _GroupProxy(
+            this._parent,
+            this._full(prefix),
+            [...this._middleware],
+        );
+        if (fn) fn(group);
+        return group;
+    }
+
+    Route(pattern, fn) {
+        const sub = new _GroupProxy(
+            this._parent,
+            this._full(pattern),
+            [...this._middleware],
+        );
+        fn(sub);
+        return this;
+    }
+
+    // Named routes — delegate to parent so navigate() can resolve them
+    name(routeName, pattern) {
+        this._parent.name(routeName, this._full(pattern));
+        return this;
+    }
+
+    // Prefetch — delegate to parent's trie
+    Prefetch(pattern) {
+        this._parent.Prefetch(this._full(pattern));
+        return this;
+    }
+
+    NotFound(responder) { this._parent.NotFound(responder); return this; }
+    Error(responder)    { this._parent.Error(responder);    return this; }
+    beforeEach(fn)      { this._parent.beforeEach(fn);      return this; }
+    afterEach(fn)       { this._parent.afterEach(fn);       return this; }
 }
 
 // ─── Built-in middleware ──────────────────────────────────────────────────────
