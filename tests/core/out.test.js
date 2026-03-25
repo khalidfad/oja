@@ -383,63 +383,63 @@ describe('Out — cacheStats() and clearCache()', () => {
 
 // ─── Out.to() — tagged template literal ──────────────────────────────────────
 
-describe('Out.to() — tagged template literal', () => {
+describe('Out.tag() — tagged template literal', () => {
     let el;
     afterEach(() => { cleanup(el); });
 
     it('renders static string via tagged template', () => {
         el = makeContainer();
-        Out.to(el)`<p>Hello</p>`;
+        Out.tag(el)`<p>Hello</p>`;
         expect(el.innerHTML).toBe('<p>Hello</p>');
     });
 
     it('interpolates a single value', () => {
         el = makeContainer();
         const name = 'World';
-        Out.to(el)`<h1>Hello ${name}!</h1>`;
+        Out.tag(el)`<h1>Hello ${name}!</h1>`;
         expect(el.innerHTML).toBe('<h1>Hello World!</h1>');
     });
 
     it('interpolates multiple values', () => {
         el = makeContainer();
         const a = 'foo', b = 42;
-        Out.to(el)`${a} and ${b}`;
+        Out.tag(el)`${a} and ${b}`;
         expect(el.innerHTML).toBe('foo and 42');
     });
 
     it('escapes XSS in interpolated values', () => {
         el = makeContainer();
         const xss = '<script>alert(1)</script>';
-        Out.to(el)`<div>${xss}</div>`;
+        Out.tag(el)`<div>${xss}</div>`;
         expect(el.innerHTML).not.toContain('<script>');
         expect(el.innerHTML).toContain('&lt;script&gt;');
     });
 
     it('does not escape the template string itself', () => {
         el = makeContainer();
-        Out.to(el)`<strong>${'safe'}</strong>`;
+        Out.tag(el)`<strong>${'safe'}</strong>`;
         expect(el.innerHTML).toBe('<strong>safe</strong>');
     });
 
-    it('proxy is callable without throwing', () => {
+    it('is callable without throwing', () => {
         el = makeContainer();
-        expect(() => Out.to(el)`hello`).not.toThrow();
+        expect(() => Out.tag(el)`hello`).not.toThrow();
     });
 
-    it('method chaining still works through the proxy', () => {
+    it('method chaining on Out.to() still works', () => {
         el = makeContainer();
         Out.to(el).text('hi');
         expect(el.textContent).toBe('hi');
     });
 
-    it('.html() works through the proxy', () => {
+    it('.html() works on Out.to()', () => {
         el = makeContainer();
         Out.to(el).html('<em>test</em>');
         expect(el.innerHTML).toBe('<em>test</em>');
     });
 
     it('does not throw when selector finds nothing', () => {
-        expect(() => Out.to('#nonexistent')`hello`).not.toThrow();
+        expect(() => Out.tag('#nonexistent')`hello`).not.toThrow();
     });
 });
 
