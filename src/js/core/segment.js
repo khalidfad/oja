@@ -163,7 +163,8 @@ export const segment = {
      */
     scan(root = document) {
         _scanned = true; // suppress the auto-scan — this IS the scan
-        _scanRoot(root instanceof Document ? root : root);
+        // Previously both ternary branches passed the same value.
+        _scanRoot(root instanceof Document ? root.documentElement : root);
         return this;
     },
 
