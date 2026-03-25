@@ -472,7 +472,8 @@ export function onScroll(target, fn, options = {}) {
         };
 
         el.addEventListener('scroll', handler, { passive: true });
-        el._scrollHandler = handler;
+        // Store handler in Map entry, not as DOM property (prevents GC leak)
+        _scrollListeners.get(el)._handler = handler;
     }
 
     const handlers = _scrollListeners.get(el);
@@ -483,8 +484,9 @@ export function onScroll(target, fn, options = {}) {
         if (handlers) {
             handlers.delete(fn);
             if (handlers.size === 0) {
-                if (el._scrollHandler) {
-                    el.removeEventListener('scroll', el._scrollHandler);
+                const storedHandler = _scrollListeners.get(el)?._handler;
+                if (storedHandler) {
+                    el.removeEventListener('scroll', storedHandler);
                 }
                 _scrollListeners.delete(el);
                 _scrollRaf.delete(el);
@@ -765,6 +767,9 @@ const _mutationObservers = new Map(); // element → observer
  *       mutations.forEach(m => console.log('Added:', m.addedNodes));
  *   }, { childList: true, subtree: true });
  */
+// onMutation now supports multiple independent handlers per element.
+// Previously a second call replaced the first observer, silently stopping handlerA.
+// _mutationObservers now stores { observer, handlers: Set } per element.
 export function onMutation(target, fn, options = {}) {
     const el = typeof target === 'string' ? document.querySelector(target) : target;
     if (!el) {
@@ -773,13 +778,20 @@ export function onMutation(target, fn, options = {}) {
     }
 
     if (!_mutationObservers.has(el)) {
+        const handlers = new Set();
         const observer = new MutationObserver((mutations) => {
-            fn(mutations, observer);
+            for (const h of handlers) {
+                try { h(mutations, observer); } catch (e) {
+                    console.warn('[oja/events] onMutation handler error:', e);
+                }
+            }
         });
-        _mutationObservers.set(el, observer);
+        _mutationObservers.set(el, { observer, handlers });
     }
 
-    const observer = _mutationObservers.get(el);
+    const { observer, handlers } = _mutationObservers.get(el);
+    handlers.add(fn);
+
     observer.observe(el, {
         childList: false,
         attributes: false,
@@ -789,8 +801,11 @@ export function onMutation(target, fn, options = {}) {
     });
 
     return () => {
-        observer.disconnect();
-        _mutationObservers.delete(el);
+        handlers.delete(fn);
+        if (handlers.size === 0) {
+            observer.disconnect();
+            _mutationObservers.delete(el);
+        }
     };
 }
 
@@ -812,7 +827,9 @@ export function onMutation(target, fn, options = {}) {
 export function debounce(fn, ms = 200, options = {}) {
     const { leading = false, maxWait = 0 } = options;
     let timer = null;
-    let lastCall = 0;
+    // Initialise lastCall to now so maxWait doesn't fire immediately
+    // on the very first call (previously lastCall=0 meant now-0 > any maxWait).
+    let lastCall = Date.now();
     let maxTimer = null;
 
     const debounced = function (...args) {
@@ -985,4 +1002,104 @@ export function onlyOnce(fn) {
         result = fn.apply(this, args);
         return result;
     };
+}
+// ─── F-17: onClickOutside ─────────────────────────────────────────────────────
+/**
+ * Fire fn when a click occurs outside the given element.
+ * Deduplicates what clickmenu.js, modal.js, and popover.js all implement manually.
+ * Returns an unsubscribe function.
+ *
+ *   const off = onClickOutside('#dropdown', () => close());
+ *   off(); // stop listening
+ */
+export function onClickOutside(target, fn, options = {}) {
+    const el = typeof target === 'string' ? document.querySelector(target) : target;
+    if (!el) {
+        console.warn(`[oja/events] onClickOutside: target not found`);
+        return () => {};
+    }
+
+    const { capture = true } = options;
+    const handler = (e) => {
+        if (!el.contains(e.target)) fn(e);
+    };
+
+    // Delay one tick so the click that opened the element doesn't immediately close it
+    setTimeout(() => document.addEventListener('click', handler, { capture }), 0);
+
+    return () => document.removeEventListener('click', handler, { capture });
+}
+
+// ─── F-18: onHover ────────────────────────────────────────────────────────────
+/**
+ * Listen for mouseenter/mouseleave on a target with a single cleanup function.
+ * Returns an unsubscribe function.
+ *
+ *   const off = onHover('#btn', () => showTooltip(), () => hideTooltip());
+ */
+export function onHover(target, enterFn, leaveFn, options = {}) {
+    const el = typeof target === 'string' ? document.querySelector(target) : target;
+    if (!el) {
+        console.warn(`[oja/events] onHover: target not found`);
+        return () => {};
+    }
+
+    el.addEventListener('mouseenter', enterFn);
+    el.addEventListener('mouseleave', leaveFn);
+
+    const unsub = () => {
+        el.removeEventListener('mouseenter', enterFn);
+        el.removeEventListener('mouseleave', leaveFn);
+    };
+    _registerWithActiveComponent(unsub);
+    return unsub;
+}
+
+// ─── F-19: onLongPress ────────────────────────────────────────────────────────
+/**
+ * Fire fn after the pointer has been held down for `duration` ms.
+ * Cancels cleanly on pointerup, pointercancel, or pointermove beyond threshold.
+ * Returns an unsubscribe function.
+ *
+ *   const off = onLongPress('#item', (e) => openContextMenu(e), 500);
+ */
+export function onLongPress(target, fn, duration = 500, options = {}) {
+    const el = typeof target === 'string' ? document.querySelector(target) : target;
+    if (!el) {
+        console.warn(`[oja/events] onLongPress: target not found`);
+        return () => {};
+    }
+
+    const { moveThreshold = 10 } = options;
+    let timer = null;
+    let startX = 0, startY = 0;
+
+    const start = (e) => {
+        startX = e.clientX; startY = e.clientY;
+        timer = setTimeout(() => { fn(e); timer = null; }, duration);
+    };
+
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+    const move = (e) => {
+        if (timer && (Math.abs(e.clientX - startX) > moveThreshold ||
+                      Math.abs(e.clientY - startY) > moveThreshold)) {
+            cancel();
+        }
+    };
+
+    el.addEventListener('pointerdown', start);
+    el.addEventListener('pointerup', cancel);
+    el.addEventListener('pointercancel', cancel);
+    el.addEventListener('pointermove', move);
+
+    const unsub = () => {
+        cancel();
+        el.removeEventListener('pointerdown', start);
+        el.removeEventListener('pointerup', cancel);
+        el.removeEventListener('pointercancel', cancel);
+        el.removeEventListener('pointermove', move);
+    };
+    _registerWithActiveComponent(unsub);
+    return unsub;
 }
