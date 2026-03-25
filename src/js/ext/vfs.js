@@ -837,8 +837,52 @@ export class VFS {
      *   await vfs.ready();
      *   const html = await vfs.readText('index.html');
      */
-    ready() {
-        return this.#readyPromise;
+    /**
+     * Resolves when the VFS worker is ready. Also requests durable storage
+     * on first call so the browser won't evict notes under storage pressure.
+     */
+    async ready() {
+        await this.#readyPromise;
+        // Request durable storage once — fire-and-forget, non-fatal if denied.
+        this.persist().catch(() => {});
+        return this;
+    }
+
+    /**
+     * Request durable (persistent) storage for this origin.
+     * When granted, the browser requires explicit user action to evict data
+     * rather than doing so silently under storage pressure.
+     *
+     *   const granted = await vfs.persist();
+     *   if (!granted) console.warn('Storage may be evicted under pressure');
+     *
+     * @returns {Promise<boolean>}
+     */
+    async persist() {
+        if (!navigator?.storage?.persist) return false;
+        const already = await navigator.storage.persisted().catch(() => false);
+        if (already) return true;
+        return navigator.storage.persist().catch(() => false);
+    }
+
+    /**
+     * Return storage usage and quota for this origin.
+     *
+     *   const { usedMB, quotaMB, percent } = await vfs.quota();
+     *   console.log(`Using ${usedMB} MB of ${quotaMB} MB (${percent}%)`);
+     *
+     * @returns {Promise<{ used, quota, usedMB, quotaMB, percent } | null>}
+     */
+    async quota() {
+        if (!navigator?.storage?.estimate) return null;
+        const { usage = 0, quota = 0 } = await navigator.storage.estimate().catch(() => ({}));
+        return {
+            used:    usage,
+            quota,
+            usedMB:  (usage  / 1024 / 1024).toFixed(1),
+            quotaMB: (quota  / 1024 / 1024).toFixed(0),
+            percent: quota > 0 ? Math.round((usage / quota) * 100) : 0,
+        };
     }
 
     // Returns the MIME type for a path
