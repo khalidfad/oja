@@ -565,8 +565,18 @@ export class VFS {
      *   await vfs.flush();
      */
     write(path, content) {
-        this._normPath(path);
-        this.#runner.send('write', { path: this._normPath(path), content });
+        const normalised = this._normPath(path);
+        if (this.options.encrypt?.seal) {
+            // Invoke seal() synchronously so the call is registered immediately.
+            // The resolved value is sent to the worker once the promise settles.
+            // write() still returns undefined (fire and forget contract is preserved).
+            const sealPromise = Promise.resolve(this.options.encrypt.seal(content));
+            sealPromise.then(sealed => {
+                this.#runner.send('write', { path: normalised, content: sealed });
+            });
+        } else {
+            this.#runner.send('write', { path: normalised, content });
+        }
     }
 
     /**
@@ -596,12 +606,19 @@ export class VFS {
 
     // Read a file as text — convenience wrapper over read()
     async readText(path) {
-        const content = await this.read(path);
-        if (content === null) return null;
-        if (content instanceof ArrayBuffer) {
-            return new TextDecoder().decode(content);
+        const raw = await this.read(path);
+        if (raw === null) return null;
+        let text;
+        if (raw instanceof ArrayBuffer) {
+            text = new TextDecoder().decode(raw);
+        } else {
+            text = raw;
         }
-        return content;
+        // Decrypt if encrypt hook is configured and content is sealed
+        if (this.options.encrypt?.open && this.options.encrypt?.isSealed?.(text)) {
+            text = await this.options.encrypt.open(text);
+        }
+        return text;
     }
 
     /**
@@ -956,4 +973,7 @@ export class VFS {
         // Strip leading slash — VFS uses relative paths internally
         return path.startsWith('/') ? path.slice(1) : path;
     }
+
+    // ─── Storage management ────────────────────────────────────────────
+
 }
