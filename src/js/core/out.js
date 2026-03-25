@@ -1287,40 +1287,22 @@ class _SegmentOut extends _Out {
 
 export const Out = {
 
-    // Entry point for the fluent API — returns a chainable OutTarget.
-    // Supports method chaining and tagged template literal syntax.
+    // Entry point for the fluent chainable API.
+    // Returns an OutTarget directly — no Proxy, no magic.
     //
-    // The tagged template form — Out.to('#el')`<h1>Hello ${name}!</h1>` —
-    // requires the returned value to be callable. A Proxy can only intercept
-    // `apply` when the proxy target is itself a function, so we wrap a dummy
-    // function and forward all property access to the real OutTarget.
+    //   Out.to('#app').html('<h1>Hello</h1>');
+    //   Out.to('#app').component('pages/hosts.html', data);
+    //   Out.to('#app').animate('fadeIn').component('modal.html');
     to(target) {
-        const outTarget = new OutTarget(target);
-        // Dummy function — gives the Proxy a callable target so the `apply`
-        // trap fires when the result is used as a tagged template tag.
-        const fn = function() {};
-        const proxy = new Proxy(fn, {
-            get(_fn, prop) {
-                if (prop === Symbol.for('nodejs.util.promisify.custom')) return undefined;
-                const val = outTarget[prop];
-                if (typeof val === 'function') {
-                    return function(...args) {
-                        const result = val.apply(outTarget, args);
-                        // If the method returned the OutTarget (chaining), return
-                        // the Proxy instead so callers get a consistent reference.
-                        return result === outTarget ? proxy : result;
-                    };
-                }
-                return val;
-            },
-            has(_fn, prop) {
-                return prop in outTarget;
-            },
-            apply(_fn, _thisArg, args) {
-                return createTagHandler(target).apply(outTarget, args);
-            }
-        });
-        return proxy;
+        return new OutTarget(target);
+    },
+
+    // Tagged template literal entry point.
+    // Separated from to() so Out.to() can return a plain OutTarget.
+    //
+    //   Out.tag('#app')`<h1>Hello ${name}!</h1>`;
+    tag(target) {
+        return createTagHandler(target);
     },
 
     skeleton(target, type = 'text', options = {}) {
@@ -1459,7 +1441,7 @@ export const Out = {
     },
 
     /**
-     * Zero-dependency inline SVG time-series line chart.
+     * A-09: Zero-dependency inline SVG time-series line chart.
      * Supports multiple series, axis labels, and tooltips on hover.
      *
      *   Out.timeSeries([
