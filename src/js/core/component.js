@@ -113,7 +113,7 @@ async function _load(url) {
     }
 
     if (cached) {
-        _cacheStats.totalBytes -= cached.size || 0;
+        _cacheStats.totalBytes = Math.max(0, _cacheStats.totalBytes - (cached.size || 0)); // FIX L-05
         _cache.delete(url);
     }
 
@@ -128,7 +128,10 @@ async function _load(url) {
 
     _cacheStats.totalBytes += size;
 
-    while (_cache.size >= _cacheConfig.maxSize || _cacheStats.totalBytes > _cacheConfig.maxMemory) {
+    // Guard on cache.size > 0 to prevent infinite loop when a single
+    // component exceeds maxMemory (evictOldest() is a no-op on empty cache).
+    while (_cache.size > 0 &&
+    (_cache.size >= _cacheConfig.maxSize || _cacheStats.totalBytes > _cacheConfig.maxMemory)) {
         _evictOldest();
     }
 
@@ -151,7 +154,7 @@ function _evictOldest() {
 
     if (oldestUrl) {
         const entry = _cache.get(oldestUrl);
-        _cacheStats.totalBytes -= entry.size || 0;
+        _cacheStats.totalBytes = Math.max(0, _cacheStats.totalBytes - (entry.size || 0)); // FIX L-05
         _cacheStats.evictions++;
         _cache.delete(oldestUrl);
         emit('component:cache-evict', { url: oldestUrl });
@@ -247,6 +250,14 @@ function _flash(el) {
 }
 
 export const component = {
+
+    configure(config = {}) {
+        return this.configureCache(config);
+    },
+
+    async load(url) {
+        return _load(url);
+    },
 
     configureCache(config = {}) {
         _cacheConfig = { ..._cacheConfig, ...config };
