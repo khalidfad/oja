@@ -1,4 +1,3 @@
-// src/js/core/template.js
 import {
     uppercase, lowercase, titleCase, toJson, formatBytes,
     timeAgo, formatDate, formatTime, truncate, fallback,
