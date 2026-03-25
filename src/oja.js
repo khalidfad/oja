@@ -95,8 +95,8 @@ export { Api }                                            from './js/core/api.js
 export { runtime }                                        from './js/core/runtime.js';
 
 // ─── Codecs ───────────────────────────────────────────────────────────────────
-export { JsonCodec, jsonCodec }                           from '../../../../Downloads/oja.fixed/src/js/core/codecs/json.js';
-export { MsgPackCodec }                                   from '../../../../Downloads/oja.fixed/src/js/core/codecs/msgpack.js';
+export { JsonCodec, jsonCodec }                           from './js/core/codecs/json.js';
+export { MsgPackCodec }                                   from './js/core/codecs/msgpack.js';
 
 // ─── Plugin ───────────────────────────────────────────────────────────────────
 export { plugin }                                         from './js/core/plugin.js';
@@ -122,8 +122,8 @@ import { Store }                                         from './js/core/store.j
 import { render, renderRaw, fill, each, template }       from './js/core/template.js';
 import { Out, Responder }                                from './js/core/out.js';
 import { Api }                                           from './js/core/api.js';
-import { JsonCodec, jsonCodec }                          from '../../../../Downloads/oja.fixed/src/js/core/codecs/json.js';
-import { MsgPackCodec }                                  from '../../../../Downloads/oja.fixed/src/js/core/codecs/msgpack.js';
+import { JsonCodec, jsonCodec }                          from './js/core/codecs/json.js';
+import { MsgPackCodec }                                  from './js/core/codecs/msgpack.js';
 import { Router }                                        from './js/core/router.js';
 import { component }                                     from './js/core/component.js';
 import { layout, allSlotsReady }                         from './js/core/layout.js';
